@@ -1,0 +1,3 @@
+C:/Users/berke/OneDrive/Desktop/Projects/VisionLab/cpp-opencv-core/build/CMakeFiles/VisionLabCore.dir
+C:/Users/berke/OneDrive/Desktop/Projects/VisionLab/cpp-opencv-core/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/berke/OneDrive/Desktop/Projects/VisionLab/cpp-opencv-core/build/CMakeFiles/ZERO_CHECK.dir

@@ -1,0 +1,10 @@
+^C:\USERS\BERKE\ONEDRIVE\DESKTOP\PROJECTS\VISIONLAB\CPP-OPENCV-CORE\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/Users/berke/OneDrive/Desktop/Projects/VisionLab/cpp-opencv-core -BC:/Users/berke/OneDrive/Desktop/Projects/VisionLab/cpp-opencv-core/build --check-stamp-file C:/Users/berke/OneDrive/Desktop/Projects/VisionLab/cpp-opencv-core/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

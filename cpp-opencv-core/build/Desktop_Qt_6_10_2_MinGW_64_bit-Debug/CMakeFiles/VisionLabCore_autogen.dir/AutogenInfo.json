@@ -386,6 +386,12 @@
 			"MU",
 			"UVLADIE3JM/moc_videoglwidget.cpp",
 			null
+		],
+		[
+			"C:/Users/Berke/Desktop/Projects/VisionLab/cpp-opencv-core/src/visionworker.h",
+			"MU",
+			"UVLADIE3JM/moc_visionworker.cpp",
+			null
 		]
 	],
 	"HEADER_EXTENSIONS" : [ "h", "hh", "h++", "hm", "hpp", "hxx", "in", "txx" ],
@@ -476,6 +482,11 @@
 		],
 		[
 			"C:/Users/Berke/Desktop/Projects/VisionLab/cpp-opencv-core/src/videoglwidget.cpp",
+			"MU",
+			null
+		],
+		[
+			"C:/Users/Berke/Desktop/Projects/VisionLab/cpp-opencv-core/src/visionworker.cpp",
 			"MU",
 			null
 		]

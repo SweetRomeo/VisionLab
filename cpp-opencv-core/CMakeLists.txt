@@ -26,6 +26,7 @@ add_executable(VisionLabCore
     src/videoglwidget.h
     src/videoglwidget.cpp
     mainwindow.h mainwindow.cpp
+    src/visionworker.h src/visionworker.cpp
 )
 
 # Kütüphaneleri Bağlama

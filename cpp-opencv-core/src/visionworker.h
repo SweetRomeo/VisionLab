@@ -8,9 +8,9 @@
 #include <QString>
 #include <QElapsedTimer>
 
-
-#include <atomic>
 #include <opencv2/opencv.hpp>
+
+class QTimer;
 
 class VisionWorker final : public QObject
 {
@@ -36,11 +36,6 @@ signals:
 private:
     void processNextFrame();
 
-    void applyAlgorithm(
-        const cv::Mat &source,
-        cv::Mat &destination
-        );
-
     cv::VideoCapture camera;
     QTimer *frameTimer = nullptr;
 
@@ -48,12 +43,10 @@ private:
     int processedFrameCount = 0;
     double accumulatedProcessingTimeMs = 0.0;
 
-    std::atomic<bool> isRunning{false};
     QMutex parameterMutex;
     ProcessingAlgorithm currentAlgorithm = ProcessingAlgorithm::Original;
-    double gammaValue{1.0};
-    double claheClipLimit{4.0};
-    int claheGridSize{8};
+    ImageProcess imageprocessor;
+    ProcessingParameters processingParameters;
 };
 
 #endif // VISIONWORKER_H

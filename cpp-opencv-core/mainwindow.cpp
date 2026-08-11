@@ -128,7 +128,8 @@ bool loadProjectFromFile(
     const QStringList validAlgorithms{
         "Orijinal",
         "Gamma Correction",
-        "CLAHE"
+        "Histogram Equalization",
+        "CLAHE",
     };
 
     if (!validAlgorithms.contains(loadedProject.algorithm))

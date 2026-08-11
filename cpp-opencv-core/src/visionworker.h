@@ -1,44 +1,58 @@
 #ifndef VISIONWORKER_H
 #define VISIONWORKER_H
 
-#pragma once
-#include <QObject>
 #include <QImage>
-#include <QString>
 #include <QMutex>
-#include <QMutexLocker>
+#include <QObject>
+#include <QString>
+#include <QElapsedTimer>
+
+
 #include <atomic>
 #include <opencv2/opencv.hpp>
 
-class VisionWorker : public QObject
+class VisionWorker final : public QObject
 {
     Q_OBJECT
+
 public:
     explicit VisionWorker(QObject *parent = nullptr);
-    ~VisionWorker();
+    ~VisionWorker() override;
 
 public slots:
-    // Arayüzden (UI) tetiklenecek fonksiyonlar
     void startProcessing();
     void stopProcessing();
-    void setAlgorithm(const QString& algoName);
+    void setAlgorithm(const QString &algorithmName);
     void setGammaValue(double gamma);
+    void setClaheClipLimit(double clipLimit);
+    void setClaheGridSize(int gridSize);
 
 signals:
-    // Arayüze fırlatılacak veriler
-    void framesReady(const QImage& readyFrame);
+    void framesReady(const QImage &readyFrame);
     void metricsUpdated(double fps, double processTimeMs);
+    void statusChanged(const QString &status, bool isError);
 
 private:
-    // Thread güvenliği (Thread-safety) için değişkenler
-    std::atomic<bool> isRunning; // Döngüyü güvenle kırmak için
+    void processNextFrame();
 
-    QMutex paramMutex;           // Algoritma parametrelerini koruyan kilit
-    QString currentAlgorithm;
-    double gammaValue;
+    void applyAlgorithm(
+        const cv::Mat &source,
+        cv::Mat &destination
+        );
 
-    // Arka plan iş mantığı
-    void applyAlgorithm(const cv::Mat& src, cv::Mat& dst);
+    cv::VideoCapture camera;
+    QTimer *frameTimer = nullptr;
+
+    QElapsedTimer fpsTimer;
+    int processedFrameCount = 0;
+    double accumulatedProcessingTimeMs = 0.0;
+
+    std::atomic<bool> isRunning{false};
+    QMutex parameterMutex;
+    QString currentAlgorithm{"Orijinal"};
+    double gammaValue{1.0};
+    double claheClipLimit{4.0};
+    int claheGridSize{8};
 };
 
 #endif // VISIONWORKER_H

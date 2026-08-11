@@ -1,38 +1,45 @@
 #include "videoglwidget.h"
+
 #include <QPainter>
 
-VideoGLWidget::VideoGLWidget(QOpenGLWidget *parent)
+VideoGLWidget::VideoGLWidget(QWidget *parent)
     : QOpenGLWidget(parent)
 {
     setAttribute(Qt::WA_OpaquePaintEvent);
 }
 
-void VideoGLWidget::updateFrame(const QImage& frame)
+void VideoGLWidget::updateFrame(const QImage &frame)
 {
     currentFrame = frame;
     update();
 }
 
-void VideoGLWidget::paintEvent(QPaintEvent *event) {
-    QPainter painter(this);
+void VideoGLWidget::paintEvent(QPaintEvent *event)
+{
+    Q_UNUSED(event);
 
-    // Yüksek FPS için pürüzsüzleştirme (smooth transformation) gibi CPU yoran
-    // İşlemleri kapalı tutmak uç nokta donanımlarda faydalıdır.
+    QPainter painter(this);
+    painter.fillRect(rect(), QColor("#080b0f"));
     painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
-    if (!currentFrame.isNull()) {
-        // Gelen kareyi widget'ın mevcut boyutuna, en-boy oranını koruyarak hızlıca ölçekle
-        QImage scaledFrame = currentFrame.scaled(this->size(), Qt::KeepAspectRatio, Qt::FastTransformation);
-
-        // Resmi tam ortaya hizalamak için X ve Y ofsetlerini hesapla
-        int x = (this->width() - scaledFrame.width()) / 2;
-        int y = (this->height() - scaledFrame.height()) / 2;
-
-        painter.drawImage(x, y, scaledFrame);
-    } else {
-        // Kamera kapalıysa veya henüz veri gelmediyse ekranı siyah tut
-        painter.fillRect(this->rect(), Qt::black);
+    if (currentFrame.isNull())
+    {
+        painter.setPen(QColor("#758391"));
+        painter.drawText(
+            rect(),
+            Qt::AlignCenter,
+            "Kamera görüntüsü bekleniyor..."
+            );
+        return;
     }
+
+    const QImage scaledFrame = currentFrame.scaled(
+        size(),
+        Qt::KeepAspectRatio,
+        Qt::FastTransformation
+        );
+
+    const int x = (width() - scaledFrame.width()) / 2;
+    const int y = (height() - scaledFrame.height()) / 2;
+    painter.drawImage(x, y, scaledFrame);
 }
-
-

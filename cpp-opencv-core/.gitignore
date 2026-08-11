@@ -1,0 +1,25 @@
+# IDE
+.idea/
+.vscode/
+*.user
+.qtc_clangd/
+
+# Qt/CMake
+/build/
+/cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+qtcsettings.cmake
+
+# MSVC
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+
+# Temporary files
+*.tmp
+*.log

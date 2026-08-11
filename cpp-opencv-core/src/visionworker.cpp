@@ -1,115 +1,239 @@
-#include "VisionWorker.h"
-#include <QElapsedTimer>
+#include "visionworker.h"
+
 #include <QCoreApplication>
-#include <QThread>
+#include <QDebug>
+#include <QElapsedTimer>
+#include <QEventLoop>
+#include <QMutexLocker>
+#include <QTimer>
+
+#include <cmath>
 
 VisionWorker::VisionWorker(QObject *parent)
-    : QObject(parent), isRunning(false), currentAlgorithm("Orijinal"), gammaValue(1.0) {
+    : QObject(parent)
+{
 }
 
-VisionWorker::~VisionWorker() {
+VisionWorker::~VisionWorker()
+{
     stopProcessing();
 }
 
-void VisionWorker::startProcessing() {
-    cv::VideoCapture cap(0); // 0: Varsayılan kamera. (Video dosyası için yol verilebilir)
-
-    if (!cap.isOpened()) {
-        qWarning() << "Kamera açılamadı!";
+void VisionWorker::startProcessing()
+{
+    // Aynı worker'ın ikinci kez başlatılmasını engelle
+    if (frameTimer != nullptr && frameTimer->isActive())
+    {
         return;
     }
 
-    isRunning = true;
-    QElapsedTimer timer; // Süre ölçümü için Qt'nin yüksek hassasiyetli sayacı
-
-    while (isRunning) {
-        cv::Mat frame;
-        cap >> frame; // Kameradan kareyi al
-
-        if (frame.empty()) continue;
-
-        // 1. İŞLEM SÜRESİNİ BAŞLAT
-        timer.restart();
-
-        // 2. ALGORİTMAYI UYGULA
-        cv::Mat processedFrame;
-        applyAlgorithm(frame, processedFrame);
-
-        // 3. METRİKLERİ HESAPLA
-        double processTime = timer.elapsed();
-        double fps = (processTime > 0) ? (1000.0 / processTime) : 0.0;
-
-        // 4. RENK UZAYINI DÖNÜŞTÜR (OpenCV BGR -> Qt RGB)
-        cv::Mat rgbFrame;
-        cv::cvtColor(processedFrame, rgbFrame, cv::COLOR_BGR2RGB);
-
-        // 5. QIMAGE OLUŞTUR VE KOPYALA (Deadlock ve Memory Leak'i önlemek için)
-        QImage qimg((const unsigned char*) rgbFrame.data,
-                    rgbFrame.cols,
-                    rgbFrame.rows,
-                    rgbFrame.step,
-                    QImage::Format_RGB888);
-
-        QImage readyFrame = qimg.copy(); // Derin kopya (Deep Copy)
-
-        // 6. VERİLERİ ARAYÜZE (UI) FIRLAT
-        emit framesReady(readyFrame);
-        emit metricsUpdated(fps, processTime);
-
-        // ÖNEMLİ: Qt'nin slotları (setAlgorithm vb.) bu while döngüsü içinde
-        // yakalayabilmesi için olay döngüsüne kısa bir nefes aldırıyoruz.
-        QCoreApplication::processEvents();
+    if (!camera.open(0))
+    {
+        emit statusChanged("Kamera açılamadı", true);
+        qWarning() << "Kamera açılamadı.";
+        return;
     }
 
-    cap.release(); // Döngü kırıldığında kamerayı serbest bırak
+    // Timer, VisionWorker worker thread'e taşındıktan sonra
+    // burada oluşturuluyor.
+    if (frameTimer == nullptr)
+    {
+        frameTimer = new QTimer(this);
+        frameTimer->setTimerType(Qt::PreciseTimer);
+
+        connect(
+            frameTimer,
+            &QTimer::timeout,
+            this,
+            &VisionWorker::processNextFrame
+            );
+    }
+
+    processedFrameCount = 0;
+    accumulatedProcessingTimeMs = 0.0;
+    fpsTimer.start();
+
+    // Kamera FPS bilgisini desteklemiyorsa 30 FPS kullan.
+    const double cameraFps = camera.get(cv::CAP_PROP_FPS);
+
+    int frameIntervalMs = 33;
+
+    if (std::isfinite(cameraFps) &&
+        cameraFps >= 1.0 &&
+        cameraFps <= 240.0)
+    {
+        frameIntervalMs = std::clamp(
+            static_cast<int>(std::lround(1000.0 / cameraFps)),
+            1,
+            1000
+            );
+    }
+
+    frameTimer->start(frameIntervalMs);
+
+    emit statusChanged("Kamera çalışıyor", false);
 }
 
-void VisionWorker::stopProcessing() {
-    isRunning = false; // While döngüsünü kırar
+void VisionWorker::stopProcessing()
+{
+    isRunning = false;
 }
 
-void VisionWorker::setAlgorithm(const QString& algoName) {
-    // UI thread'i bu değişkeni değiştirirken, Worker okumasın diye kilitliyoruz.
-    QMutexLocker locker(&paramMutex);
-    currentAlgorithm = algoName;
+void VisionWorker::setAlgorithm(const QString &algorithmName)
+{
+    QMutexLocker locker(&parameterMutex);
+    currentAlgorithm = algorithmName;
 }
 
-void VisionWorker::setGammaValue(double gamma) {
-    QMutexLocker locker(&paramMutex);
+void VisionWorker::setGammaValue(double gamma)
+{
+    QMutexLocker locker(&parameterMutex);
     gammaValue = gamma;
 }
 
-void VisionWorker::applyAlgorithm(const cv::Mat& src, cv::Mat& dst) {
-    // İşleme başlamadan önce güncel parametrelerin kopyasını alıyoruz.
-    // Böylece tüm algoritma boyunca kilitli kalıp arayüzü bekletmiyoruz.
-    paramMutex.lock();
-    QString algo = currentAlgorithm;
-    double gamma = gammaValue;
-    paramMutex.unlock();
+void VisionWorker::setClaheClipLimit(double clipLimit)
+{
+    QMutexLocker locker(&parameterMutex);
+    claheClipLimit = clipLimit;
+}
 
-    if (algo == "Gamma Correction") {
-        // Hızlı Gamma işlemi için Look-Up Table (LUT) kullanımı
-        cv::Mat lookUpTable(1, 256, CV_8U);
-        uchar* p = lookUpTable.ptr();
-        for (int i = 0; i < 256; ++i) {
-            p[i] = cv::saturate_cast<uchar>(pow(i / 255.0, gamma) * 255.0);
-        }
-        cv::LUT(src, lookUpTable, dst);
+void VisionWorker::setClaheGridSize(int gridSize)
+{
+    QMutexLocker locker(&parameterMutex);
+    claheGridSize = gridSize;
+}
 
-    } else if (algo == "CLAHE") {
-        // CLAHE genellikle Gri seviye görüntülerde çalışır
-        cv::Mat gray, claheDst;
-        cv::cvtColor(src, gray, cv::COLOR_BGR2GRAY);
-
-        cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE();
-        clahe->setClipLimit(4.0);
-        clahe->apply(gray, claheDst);
-
-        // Arayüze RGB formatında vermek için tekrar renklendiriyoruz
-        cv::cvtColor(claheDst, dst, cv::COLOR_GRAY2BGR);
-
-    } else {
-        // "Orijinal" seçiliyse veya bilinmeyen bir algoritmaysa doğrudan kopyala
-        dst = src.clone();
+void VisionWorker::processNextFrame()
+{
+    if (!camera.isOpened())
+    {
+        return;
     }
+
+    cv::Mat frame;
+
+    if (!camera.read(frame) || frame.empty())
+    {
+        qWarning() << "Kameradan geçerli kare alınamadı.";
+        return;
+    }
+
+    QElapsedTimer processingTimer;
+    processingTimer.start();
+
+    cv::Mat processedFrame;
+    applyAlgorithm(frame, processedFrame);
+
+    const double processingTimeMs =
+        processingTimer.nsecsElapsed() / 1'000'000.0;
+
+    cv::Mat rgbFrame;
+    cv::cvtColor(
+        processedFrame,
+        rgbFrame,
+        cv::COLOR_BGR2RGB
+        );
+
+    const QImage image(
+        rgbFrame.data,
+        rgbFrame.cols,
+        rgbFrame.rows,
+        static_cast<qsizetype>(rgbFrame.step),
+        QImage::Format_RGB888
+        );
+
+    emit framesReady(image.copy());
+
+    ++processedFrameCount;
+    accumulatedProcessingTimeMs += processingTimeMs;
+
+    const qint64 elapsedMs = fpsTimer.elapsed();
+
+    // Metrikleri her kare yerine saniyede yaklaşık bir kez gönder
+    if (elapsedMs >= 1000)
+    {
+        const double actualFps =
+            processedFrameCount * 1000.0 /
+            static_cast<double>(elapsedMs);
+
+        const double averageProcessingTimeMs =
+            accumulatedProcessingTimeMs /
+            static_cast<double>(processedFrameCount);
+
+        emit metricsUpdated(
+            actualFps,
+            averageProcessingTimeMs
+            );
+
+        processedFrameCount = 0;
+        accumulatedProcessingTimeMs = 0.0;
+        fpsTimer.restart();
+    }
+}
+
+
+void VisionWorker::applyAlgorithm(
+    const cv::Mat &source,
+    cv::Mat &destination
+)
+{
+    QString algorithm;
+    double gamma = 1.0;
+
+    double clipLimit = 4.0;
+    int gridSize = 8;
+
+    {
+        QMutexLocker locker(&parameterMutex);
+
+        algorithm = currentAlgorithm;
+        gamma = gammaValue;
+
+        clipLimit = claheClipLimit;
+        gridSize = claheGridSize;
+    }
+
+    if (algorithm == "Gamma Correction")
+    {
+        cv::Mat lookupTable(1, 256, CV_8U);
+        auto *table = lookupTable.ptr<uchar>();
+
+        for (int i = 0; i < 256; ++i)
+        {
+            table[i] = cv::saturate_cast<uchar>(
+                std::pow(i / 255.0, gamma) * 255.0
+            );
+        }
+
+        cv::LUT(source, lookupTable, destination);
+        return;
+    }
+
+    if (algorithm == "CLAHE")
+    {
+        cv::Mat grayFrame;
+        cv::Mat claheFrame;
+
+        cv::cvtColor(
+            source,
+            grayFrame,
+            cv::COLOR_BGR2GRAY
+        );
+
+        const cv::Ptr<cv::CLAHE> clahe =
+            cv::createCLAHE(
+                clipLimit,
+                cv::Size(gridSize, gridSize)
+                );
+        clahe->apply(grayFrame, claheFrame);
+
+        cv::cvtColor(
+            claheFrame,
+            destination,
+            cv::COLOR_GRAY2BGR
+        );
+        return;
+    }
+
+    destination = source.clone();
 }

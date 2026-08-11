@@ -21,7 +21,6 @@ struct ProcessingParameters
 class ImageProcess final
 {
 public:
-    ImageProcess();
     void process(
         const cv::Mat &source,
         cv::Mat &destination,

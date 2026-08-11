@@ -1,14 +1,12 @@
 #include "visionworker.h"
 
-
-#include <QCoreApplication>
 #include <QDebug>
 #include <QElapsedTimer>
-#include <QEventLoop>
 #include <QMutexLocker>
 #include <QTimer>
 
 #include <cmath>
+#include <algorithm>
 
 VisionWorker::VisionWorker(QObject *parent)
     : QObject(parent)

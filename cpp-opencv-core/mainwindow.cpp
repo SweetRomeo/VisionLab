@@ -223,7 +223,8 @@ void MainWindow::createInterface()
     algorithmCombo->addItems({
         "Orijinal",
         "Gamma Correction",
-        "CLAHE"
+        "Histogram Equalization",
+        "CLAHE",
     });
     controlLayout->addWidget(algorithmCombo);
 

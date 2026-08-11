@@ -45,7 +45,7 @@ private:
 
     QMutex parameterMutex;
     ProcessingAlgorithm currentAlgorithm = ProcessingAlgorithm::Original;
-    ImageProcess imageprocessor;
+    ImageProcess imageProcessor;
     ProcessingParameters processingParameters;
 };
 

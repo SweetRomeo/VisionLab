@@ -1,5 +1,6 @@
 #ifndef VISIONWORKER_H
 #define VISIONWORKER_H
+#include "imageprocess.h"
 
 #include <QImage>
 #include <QMutex>
@@ -49,7 +50,7 @@ private:
 
     std::atomic<bool> isRunning{false};
     QMutex parameterMutex;
-    QString currentAlgorithm{"Orijinal"};
+    ProcessingAlgorithm currentAlgorithm = ProcessingAlgorithm::Original;
     double gammaValue{1.0};
     double claheClipLimit{4.0};
     int claheGridSize{8};

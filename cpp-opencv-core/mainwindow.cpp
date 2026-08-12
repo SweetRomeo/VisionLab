@@ -159,13 +159,16 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    if (visionWorker != nullptr)
+    if (visionWorker != nullptr &&
+        workerThread != nullptr &&
+        workerThread->isRunning())
     {
-        visionWorker->stopProcessing();
-    }
+        QMetaObject::invokeMethod(
+            visionWorker,
+            &VisionWorker::stopProcessing,
+            Qt::BlockingQueuedConnection
+            );
 
-    if (workerThread != nullptr && workerThread->isRunning())
-    {
         workerThread->quit();
         workerThread->wait();
     }

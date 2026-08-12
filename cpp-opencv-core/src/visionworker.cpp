@@ -1,13 +1,12 @@
 #include "visionworker.h"
 
-#include <QCoreApplication>
 #include <QDebug>
 #include <QElapsedTimer>
-#include <QEventLoop>
 #include <QMutexLocker>
 #include <QTimer>
 
 #include <cmath>
+#include <algorithm>
 
 VisionWorker::VisionWorker(QObject *parent)
     : QObject(parent)
@@ -76,31 +75,60 @@ void VisionWorker::startProcessing()
 
 void VisionWorker::stopProcessing()
 {
-    isRunning = false;
+    if (frameTimer != nullptr)
+    {
+        frameTimer->stop();
+    }
+
+    if (camera.isOpened())
+    {
+        camera.release();
+    }
+
+    emit statusChanged("Kamera durduruldu", false);
 }
 
 void VisionWorker::setAlgorithm(const QString &algorithmName)
 {
+    ProcessingAlgorithm selectedAlgorithm =
+        ProcessingAlgorithm::Original;
+
+    if (algorithmName == "Gamma Correction")
+    {
+        selectedAlgorithm =
+            ProcessingAlgorithm::GammaCorrection;
+    }
+    else if (algorithmName == "Histogram Equalization")
+    {
+        selectedAlgorithm =
+            ProcessingAlgorithm::HistogramEqualization;
+    }
+    else if (algorithmName == "CLAHE")
+    {
+        selectedAlgorithm =
+            ProcessingAlgorithm::Clahe;
+    }
+
     QMutexLocker locker(&parameterMutex);
-    currentAlgorithm = algorithmName;
+    currentAlgorithm = selectedAlgorithm;
 }
 
 void VisionWorker::setGammaValue(double gamma)
 {
     QMutexLocker locker(&parameterMutex);
-    gammaValue = gamma;
+    processingParameters.gammaValue = gamma;
 }
 
 void VisionWorker::setClaheClipLimit(double clipLimit)
 {
     QMutexLocker locker(&parameterMutex);
-    claheClipLimit = clipLimit;
+    processingParameters.claheClipLimit = clipLimit;
 }
 
 void VisionWorker::setClaheGridSize(int gridSize)
 {
     QMutexLocker locker(&parameterMutex);
-    claheGridSize = gridSize;
+    processingParameters.claheGridSize = gridSize;
 }
 
 void VisionWorker::processNextFrame()
@@ -118,11 +146,21 @@ void VisionWorker::processNextFrame()
         return;
     }
 
+    ProcessingAlgorithm algorithm;
+    ProcessingParameters parameters;
+
+    {
+        QMutexLocker locker(&parameterMutex);
+        algorithm = currentAlgorithm;
+        parameters = processingParameters;
+    }
+
     QElapsedTimer processingTimer;
     processingTimer.start();
 
     cv::Mat processedFrame;
-    applyAlgorithm(frame, processedFrame);
+
+    imageProcessor.process(frame, processedFrame, algorithm, parameters);
 
     const double processingTimeMs =
         processingTimer.nsecsElapsed() / 1'000'000.0;
@@ -169,71 +207,4 @@ void VisionWorker::processNextFrame()
         accumulatedProcessingTimeMs = 0.0;
         fpsTimer.restart();
     }
-}
-
-
-void VisionWorker::applyAlgorithm(
-    const cv::Mat &source,
-    cv::Mat &destination
-)
-{
-    QString algorithm;
-    double gamma = 1.0;
-
-    double clipLimit = 4.0;
-    int gridSize = 8;
-
-    {
-        QMutexLocker locker(&parameterMutex);
-
-        algorithm = currentAlgorithm;
-        gamma = gammaValue;
-
-        clipLimit = claheClipLimit;
-        gridSize = claheGridSize;
-    }
-
-    if (algorithm == "Gamma Correction")
-    {
-        cv::Mat lookupTable(1, 256, CV_8U);
-        auto *table = lookupTable.ptr<uchar>();
-
-        for (int i = 0; i < 256; ++i)
-        {
-            table[i] = cv::saturate_cast<uchar>(
-                std::pow(i / 255.0, gamma) * 255.0
-            );
-        }
-
-        cv::LUT(source, lookupTable, destination);
-        return;
-    }
-
-    if (algorithm == "CLAHE")
-    {
-        cv::Mat grayFrame;
-        cv::Mat claheFrame;
-
-        cv::cvtColor(
-            source,
-            grayFrame,
-            cv::COLOR_BGR2GRAY
-        );
-
-        const cv::Ptr<cv::CLAHE> clahe =
-            cv::createCLAHE(
-                clipLimit,
-                cv::Size(gridSize, gridSize)
-                );
-        clahe->apply(grayFrame, claheFrame);
-
-        cv::cvtColor(
-            claheFrame,
-            destination,
-            cv::COLOR_GRAY2BGR
-        );
-        return;
-    }
-
-    destination = source.clone();
 }

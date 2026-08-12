@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/assets">
+        <file alias="visionlab-logo.png">assets/visionlab-logo.png</file>
+    </qresource>
+</RCC>

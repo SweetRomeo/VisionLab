@@ -128,7 +128,8 @@ bool loadProjectFromFile(
     const QStringList validAlgorithms{
         "Orijinal",
         "Gamma Correction",
-        "CLAHE"
+        "Histogram Equalization",
+        "CLAHE",
     };
 
     if (!validAlgorithms.contains(loadedProject.algorithm))
@@ -158,13 +159,16 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    if (visionWorker != nullptr)
+    if (visionWorker != nullptr &&
+        workerThread != nullptr &&
+        workerThread->isRunning())
     {
-        visionWorker->stopProcessing();
-    }
+        QMetaObject::invokeMethod(
+            visionWorker,
+            "stopProcessing",
+            Qt::BlockingQueuedConnection
+            );
 
-    if (workerThread != nullptr && workerThread->isRunning())
-    {
         workerThread->quit();
         workerThread->wait();
     }
@@ -222,7 +226,8 @@ void MainWindow::createInterface()
     algorithmCombo->addItems({
         "Orijinal",
         "Gamma Correction",
-        "CLAHE"
+        "Histogram Equalization",
+        "CLAHE",
     });
     controlLayout->addWidget(algorithmCombo);
 

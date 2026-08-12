@@ -165,7 +165,7 @@ MainWindow::~MainWindow()
     {
         QMetaObject::invokeMethod(
             visionWorker,
-            &VisionWorker::stopProcessing,
+            "stopProcessing",
             Qt::BlockingQueuedConnection
             );
 

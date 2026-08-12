@@ -90,11 +90,25 @@ void ImageProcess::applyGamma(
             );
     }
 
+    cv::Mat labImage;
+    cv::cvtColor(source, labImage, cv::COLOR_BGR2Lab);
+
+    std::vector<cv::Mat> labChannels;
+    cv::split(labImage, labChannels);
+
     cv::LUT(
-        source,
+        labChannels[0],
         lookupTable,
-        destination
+        labChannels[0]
         );
+
+    cv::merge(labChannels, labImage);
+
+    cv::cvtColor(
+        labImage,
+        destination,
+        cv::COLOR_Lab2BGR
+    );
 }
 
 void ImageProcess::applyHistogramEqualization(

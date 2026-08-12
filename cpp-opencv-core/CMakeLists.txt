@@ -27,6 +27,7 @@ qt_add_executable(VisionLabCore
     mainwindow.h
     mainwindow.cpp
     src/imageprocess.h src/imageprocess.cpp
+    resources.qrc
 )
 
 target_include_directories(VisionLabCore PRIVATE

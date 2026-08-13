@@ -1,0 +1,53 @@
+# Python virtual environments
+**/.venv/
+**/venv/
+
+# Python cache and test outputs
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Compiled Python modules
+*.pyd
+*.so
+
+# CMake build directories
+**/build/
+**/cmake-build-*/
+
+# CMake generated files
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/compile_commands.json
+**/CTestTestfile.cmake
+
+# Qt Creator
+*.user
+*.user.*
+**/.qtc_clangd/
+
+# MSVC generated files
+*.obj
+*.pdb
+*.ilk
+*.exe
+*.dll
+*.lib
+*.exp
+
+# IDE files
+.idea/
+.vscode/
+*.suo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log

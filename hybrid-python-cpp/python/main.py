@@ -9,7 +9,7 @@ def main() -> None:
     camera = cv2.VideoCapture(0)
 
     if not camera.isOpened():
-        raise RuntimeError("Kamera acilamadi.")
+        raise RuntimeError("Kamera açılamadı.")
 
     algorithms = {
         ord("1"): (
@@ -38,6 +38,9 @@ def main() -> None:
             frame_received, frame = camera.read()
 
             if not frame_received:
+                pressed_key = cv2.waitKey(1) & 0xFF
+                if pressed_key in (27, ord("q"), ord("Q")):
+                    break
                 continue
 
             start_time = perf_counter()
@@ -97,7 +100,7 @@ def main() -> None:
 
             pressed_key = cv2.waitKey(1) & 0xFF
 
-            if pressed_key in (27, ord("q")):
+            if pressed_key in (27, ord("q"), ord("Q")):
                 break
 
             if pressed_key in algorithms:

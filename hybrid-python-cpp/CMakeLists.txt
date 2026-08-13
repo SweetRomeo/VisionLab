@@ -7,6 +7,55 @@ if(WIN32 AND NOT DEFINED OpenCV_DIR)
     )
 endif()
 
+<<<<<<< HEAD
+=======
+if(EXISTS "${VISIONLAB_VENV_PYTHON}" AND
+   NOT Python_EXECUTABLE)
+    set(
+        Python_EXECUTABLE
+        "${VISIONLAB_VENV_PYTHON}"
+        CACHE FILEPATH
+        "Python interpreter"
+    )
+endif()
+
+find_package(
+    Python
+    COMPONENTS Interpreter Development
+    REQUIRED
+)
+
+execute_process(
+    COMMAND
+        "${Python_EXECUTABLE}"
+        -m
+        pybind11
+        --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE PYBIND11_RESULT
+)
+
+if(NOT PYBIND11_RESULT EQUAL 0)
+    message(
+        FATAL_ERROR
+        "pybind11 bulunamadi. Once requirements.txt dosyasini kur."
+    )
+endif()
+
+set(PYBIND11_FINDPYTHON ON)
+find_package(pybind11 CONFIG REQUIRED)
+
+if(WIN32 AND NOT DEFINED OpenCV_DIR)
+    set(
+        OpenCV_DIR
+        "C:/opencv/build"
+        CACHE PATH
+        "OpenCV installation directory"
+    )
+endif()
+
+>>>>>>> dfa3f1ce7a788a88e2613797bd69b8f78348e122
 find_package(OpenCV REQUIRED)
 
 set(
@@ -47,7 +96,11 @@ if(WIN32)
 
     file(
         GLOB OPENCV_RUNTIME_DLLS
+<<<<<<< HEAD
         "${OPENCV_RUNTIME_DIR}/*.dll"
+=======
+        "${OpenCV_DIR}/x64/vc16/bin/*.dll"
+>>>>>>> dfa3f1ce7a788a88e2613797bd69b8f78348e122
     )
 
     if(OPENCV_RUNTIME_DLLS)

@@ -9,7 +9,7 @@ def main() -> None:
     camera = cv2.VideoCapture(0)
 
     if not camera.isOpened():
-        raise RuntimeError("Kamera acilamadi.")
+        raise RuntimeError("Kamera açılamadı.")
 
     algorithms = {
         ord("1"): (

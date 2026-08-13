@@ -7,8 +7,6 @@ if(WIN32 AND NOT DEFINED OpenCV_DIR)
     )
 endif()
 
-<<<<<<< HEAD
-=======
 if(EXISTS "${VISIONLAB_VENV_PYTHON}" AND
    NOT Python_EXECUTABLE)
     set(

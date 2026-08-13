@@ -55,12 +55,14 @@ endif()
 set(PYBIND11_FINDPYTHON ON)
 find_package(pybind11 CONFIG REQUIRED)
 
-set(
-    OpenCV_DIR
-    "C:/opencv/build"
-    CACHE PATH
-    "OpenCV installation directory"
-)
+if(WIN32 AND NOT DEFINED OpenCV_DIR)
+    set(
+        OpenCV_DIR
+        "C:/opencv/build"
+        CACHE PATH
+        "OpenCV installation directory"
+    )
+endif()
 
 find_package(OpenCV REQUIRED)
 

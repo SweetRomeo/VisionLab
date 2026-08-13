@@ -38,6 +38,9 @@ def main() -> None:
             frame_received, frame = camera.read()
 
             if not frame_received:
+                pressed_key = cv2.waitKey(1) & 0xFF
+                if pressed_key in (27, ord("q"), ord("Q")):
+                    break
                 continue
 
             start_time = perf_counter()

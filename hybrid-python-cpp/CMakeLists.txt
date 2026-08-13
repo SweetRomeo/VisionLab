@@ -95,7 +95,7 @@ target_link_libraries(
 if(WIN32)
     file(
         GLOB OPENCV_RUNTIME_DLLS
-        "C:/opencv/build/x64/vc16/bin/*.dll"
+        "${OpenCV_DIR}/x64/vc16/bin/*.dll"
     )
 
     add_custom_command(

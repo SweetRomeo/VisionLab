@@ -9,7 +9,6 @@ from numpy.typing import NDArray
 
 Image = NDArray[np.uint8]
 
-
 class ProcessingAlgorithm(Enum):
     ORIGINAL = auto()
     GAMMA = auto()
@@ -19,7 +18,7 @@ class ProcessingAlgorithm(Enum):
 
 @dataclass
 class ProcessingParameters:
-    gamma_value: float = 1.0
+    gamma_value: float = 0.6
     clahe_clip_limit: float = 4.0
     clahe_grid_size: int = 8
 
@@ -37,10 +36,10 @@ class ImageProcess:
                 dtype=np.uint8,
             )
 
+        self._validate_source(source)
+
         if source.size == 0:
             return source.copy()
-
-        self._validate_source(source)
 
         if algorithm == ProcessingAlgorithm.ORIGINAL:
             return source.copy()

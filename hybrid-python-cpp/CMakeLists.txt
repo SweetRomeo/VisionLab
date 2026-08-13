@@ -53,7 +53,6 @@ if(WIN32 AND NOT DEFINED OpenCV_DIR)
     )
 endif()
 
->>>>>>> dfa3f1ce7a788a88e2613797bd69b8f78348e122
 find_package(OpenCV REQUIRED)
 
 set(
@@ -94,11 +93,8 @@ if(WIN32)
 
     file(
         GLOB OPENCV_RUNTIME_DLLS
-<<<<<<< HEAD
         "${OPENCV_RUNTIME_DIR}/*.dll"
-=======
         "${OpenCV_DIR}/x64/vc16/bin/*.dll"
->>>>>>> dfa3f1ce7a788a88e2613797bd69b8f78348e122
     )
 
     if(OPENCV_RUNTIME_DLLS)

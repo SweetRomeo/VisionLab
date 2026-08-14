@@ -51,3 +51,10 @@ desktop.ini
 
 # Logs
 *.log
+
+# Benchmark input videos and generated results
+benchmarks/data/*
+!benchmarks/data/README.md
+
+benchmarks/results/*
+!benchmarks/results/.gitkeep

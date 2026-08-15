@@ -95,7 +95,13 @@ def read_runtime_dependency_versions(
             f"{python_executable}: {stderr_output or error}"
         ) from error
 
-    return json.loads(process.stdout)
+    try:
+        return json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "Could not parse runtime dependencies from "
+            f"{python_executable}: {process.stdout.strip()}"
+        ) from error
 
 
 def validate_runtime_dependencies_match() -> None:

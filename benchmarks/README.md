@@ -1,8 +1,14 @@
 # VisionLab Benchmark Reproducibility Guide
 
-Follow this guide from the repository root (`VisionLab/`) to reproduce the benchmark results across all three implementations.
+This guide explains how to reproduce the VisionLab benchmarks across the following implementations:
 
-## 1) Prepare input video
+* Pure Python
+* Hybrid Python+C++
+* Pure C++
+
+Run all commands from the repository root (`VisionLab/`) unless otherwise specified.
+
+## 1. Prepare the input video
 
 Place the benchmark video at:
 
@@ -10,91 +16,365 @@ Place the benchmark video at:
 benchmarks/data/benchmark_input.mp4
 ```
 
-Detailed input requirements are documented in `benchmarks/data/README.md`.
+Detailed input requirements are documented in:
 
-## 2) Install dependencies
+```text
+benchmarks/data/README.md
+```
 
-### Pure Python runner
+All implementations must use the same input video and benchmark configuration.
+
+The shared configuration file is:
+
+```text
+benchmarks/config/benchmark_config.json
+```
+
+It defines:
+
+* Warm-up frame count
+* Measured frame count
+* Trial count
+* Resolutions
+* Algorithms and their parameters
+
+Do not change the configuration between architecture runs.
+
+## 2. Requirements
+
+The project requires:
+
+* Python 3
+* CMake 3.15 or newer
+* A C++17-compatible compiler
+* OpenCV
+* Qt6 Core, Gui, Widgets and OpenGLWidgets
+* Python packages listed in the project requirement files
+
+The C++ and Hybrid implementations must be built in Release mode for official measurements.
+
+## 3. Linux and macOS setup
+
+### 3.1. Pure Python environment
 
 ```bash
-cd pure-python
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv pure-python/.venv
+source pure-python/.venv/bin/activate
+
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-cd ..
+python -m pip install -r pure-python/requirements.txt
+
+deactivate
 ```
 
-### Hybrid Python+C++ runner
+### 3.2. Hybrid Python+C++ environment
 
 ```bash
-cd hybrid-python-cpp
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv hybrid-python-cpp/.venv
+source hybrid-python-cpp/.venv/bin/activate
+
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-cd ..
+python -m pip install -r hybrid-python-cpp/requirements.txt
+
+deactivate
 ```
 
-### C++ benchmark executable
+## 4. Build Release binaries
 
-Install system dependencies required by CMake for:
+### 4.1. Hybrid module
 
-- C++17 compiler toolchain
-- OpenCV development package
-- Qt6 Core/Gui/Widgets/OpenGLWidgets
-
-## 3) Build Release binaries
-
-### Hybrid module (Release)
+Activate the Hybrid environment before configuring CMake:
 
 ```bash
-cmake -S hybrid-python-cpp -B hybrid-python-cpp/build -DCMAKE_BUILD_TYPE=Release
-cmake --build hybrid-python-cpp/build --config Release
+source hybrid-python-cpp/.venv/bin/activate
+
+cmake \
+    -S hybrid-python-cpp \
+    -B hybrid-python-cpp/build \
+    -DCMAKE_BUILD_TYPE=Release
+
+cmake \
+    --build hybrid-python-cpp/build \
+    --config Release
+
+deactivate
 ```
 
-### Pure C++ benchmark executable (Release)
+The build must create a Python module named similar to:
 
-```bash
-cmake -S cpp-opencv-core -B cpp-opencv-core/build -DCMAKE_BUILD_TYPE=Release
-cmake --build cpp-opencv-core/build --config Release --target VisionLabCppBenchmark
+```text
+visionlab_cpp.so
 ```
 
-## 4) Run benchmark runners
+On Windows, the module uses the `.pyd` extension.
 
-From repository root:
+### 4.2. Pure C++ benchmark
 
 ```bash
+cmake \
+    -S cpp-opencv-core \
+    -B cpp-opencv-core/build \
+    -DCMAKE_BUILD_TYPE=Release
+
+cmake \
+    --build cpp-opencv-core/build \
+    --config Release \
+    --target VisionLabCppBenchmark
+```
+
+The benchmark executable must not be run from a Debug build. Debug execution is intentionally rejected by the application.
+
+## 5. Run benchmarks on Linux and macOS
+
+Run the implementations in the following order.
+
+### 5.1. Pure Python
+
+```bash
+source pure-python/.venv/bin/activate
+
 python benchmarks/runners/pure_python_benchmark.py
-python benchmarks/runners/hybrid_benchmark.py
+
+deactivate
 ```
 
-Run pure C++ benchmark:
+### 5.2. Hybrid Python+C++
+
+Activate the Hybrid environment:
+
+```bash
+source hybrid-python-cpp/.venv/bin/activate
+```
+
+If the `visionlab_cpp` module is not located automatically, set the directory containing the compiled module:
+
+```bash
+export VISIONLAB_CPP_MODULE_DIR="/absolute/path/to/hybrid-python-cpp/build"
+```
+
+For multi-config generators, the module may be inside a configuration subdirectory:
+
+```bash
+export VISIONLAB_CPP_MODULE_DIR="/absolute/path/to/hybrid-python-cpp/build/Release"
+```
+
+Run the benchmark:
+
+```bash
+python benchmarks/runners/hybrid_benchmark.py
+
+deactivate
+```
+
+### 5.3. Pure C++
+
+For a single-config build:
 
 ```bash
 ./cpp-opencv-core/build/VisionLabCppBenchmark
-# or (multi-config generators)
+```
+
+For a multi-config build:
+
+```bash
 ./cpp-opencv-core/build/Release/VisionLabCppBenchmark
 ```
 
-If your generator places the hybrid module in a non-default location, set:
+## 6. Windows setup and execution
 
-```bash
-export VISIONLAB_CPP_MODULE_DIR=/absolute/path/to/hybrid-python-cpp/build[/Release]
+The recommended Windows configuration is a 64-bit MSVC kit with Release selected in Qt Creator.
+
+Qt Creator may place binaries in kit-specific directories such as:
+
+```text
+build/Desktop_Qt_6_11_1_MSVC2022_64bit-Release
 ```
 
-## 5) Run analysis
+Use the actual Release directory generated on your computer.
+
+### 6.1. PowerShell environments
+
+If PowerShell prevents virtual-environment activation, allow scripts for the current terminal:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+Create the Pure Python environment:
+
+```powershell
+py -3 -m venv pure-python\.venv
+.\pure-python\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+python -m pip install -r pure-python\requirements.txt
+
+deactivate
+```
+
+Create the Hybrid environment:
+
+```powershell
+py -3 -m venv hybrid-python-cpp\.venv
+.\hybrid-python-cpp\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
+python -m pip install -r hybrid-python-cpp\requirements.txt
+
+deactivate
+```
+
+### 6.2. Build with Qt Creator
+
+For both `hybrid-python-cpp` and `cpp-opencv-core`:
+
+1. Open the corresponding `CMakeLists.txt` file in Qt Creator.
+2. Select a 64-bit MSVC desktop kit.
+3. Select the Release build configuration.
+4. Build the project.
+5. For the Pure C++ project, build the `VisionLabCppBenchmark` target.
+
+Do not use a Debug binary for official measurements.
+
+### 6.3. Run Pure Python in PowerShell
+
+```powershell
+.\pure-python\.venv\Scripts\Activate.ps1
+
+python benchmarks\runners\pure_python_benchmark.py
+
+deactivate
+```
+
+### 6.4. Locate and run the Hybrid module
+
+Locate the compiled module:
+
+```powershell
+Get-ChildItem hybrid-python-cpp\build -Recurse -Filter "visionlab_cpp*.pyd"
+```
+
+Activate the Hybrid environment and set the directory containing the `.pyd` file:
+
+```powershell
+.\hybrid-python-cpp\.venv\Scripts\Activate.ps1
+
+$env:VISIONLAB_CPP_MODULE_DIR="C:\path\to\VisionLab\hybrid-python-cpp\build\YOUR_RELEASE_DIRECTORY"
+
+python benchmarks\runners\hybrid_benchmark.py
+
+deactivate
+```
+
+Replace `YOUR_RELEASE_DIRECTORY` with the directory reported by Qt Creator or the preceding search command.
+
+### 6.5. Locate and run the Pure C++ benchmark
+
+Locate the executable:
+
+```powershell
+Get-ChildItem cpp-opencv-core\build -Recurse -Filter "VisionLabCppBenchmark.exe"
+```
+
+Run the Release executable:
+
+```powershell
+.\cpp-opencv-core\build\YOUR_RELEASE_DIRECTORY\VisionLabCppBenchmark.exe
+```
+
+If the following message appears, a Debug executable was selected:
+
+```text
+VisionLabCppBenchmark must be run in Release mode.
+```
+
+Switch to the Release build before continuing.
+
+### 6.6. Git Bash on Windows
+
+Run Pure Python:
+
+```bash
+source pure-python/.venv/Scripts/activate
+
+python benchmarks/runners/pure_python_benchmark.py
+
+deactivate
+```
+
+Run Hybrid Python+C++:
+
+```bash
+source hybrid-python-cpp/.venv/Scripts/activate
+
+export VISIONLAB_CPP_MODULE_DIR="C:/path/to/VisionLab/hybrid-python-cpp/build/YOUR_RELEASE_DIRECTORY"
+
+python benchmarks/runners/hybrid_benchmark.py
+
+deactivate
+```
+
+Run Pure C++:
+
+```bash
+./cpp-opencv-core/build/YOUR_RELEASE_DIRECTORY/VisionLabCppBenchmark.exe
+```
+
+## 7. Analyze the results
+
+Run the analyzer after all three benchmark runners finish successfully:
 
 ```bash
 python benchmarks/analysis/analyze_results.py
 ```
 
-## 6) Expected output files
+The analyzer validates the result files against the current benchmark configuration. It rejects:
 
-After a successful run, `benchmarks/results/` must contain:
+* Missing architecture, algorithm, resolution or trial groups
+* Missing frame indices
+* Duplicate frame indices
+* Unexpected frame indices
+* Incorrect architecture labels
+* Invalid processing-time values
+* Partial results generated with a different configuration
 
-- `pure_python_results.csv`
-- `hybrid_results.csv`
-- `pure_cpp_results.csv`
-- `benchmark_trial_summary.csv`
-- `benchmark_summary.csv`
+If the configuration changes, rerun all three implementations before analyzing the results.
+
+## 8. Expected output files
+
+After a successful benchmark and analysis run, `benchmarks/results/` must contain:
+
+```text
+pure_python_results.csv
+hybrid_results.csv
+pure_cpp_results.csv
+benchmark_trial_summary.csv
+benchmark_summary.csv
+```
+
+The first three files contain per-frame measurements. The final two files contain trial-level and overall statistics.
+
+With the default configuration, each architecture produces:
+
+```text
+4 algorithms × 3 resolutions × 5 trials × 500 measured frames
+= 30,000 measurement rows
+```
+
+Warm-up frames are not written to the result files.
+
+## 9. Fair-comparison requirements
+
+For scientifically meaningful results:
+
+* Use the same input video for all architectures.
+* Use the same benchmark configuration.
+* Build the Hybrid and Pure C++ implementations in Release mode.
+* Run all benchmarks on the same computer.
+* Keep power and performance settings unchanged.
+* Close unnecessary background applications.
+* Avoid running multiple benchmarks simultaneously.
+* Do not compare partial, smoke-test or Debug results with official results.
+* Record the hardware, operating system, compiler, Python, OpenCV and Qt versions used for the experiment.
+
+Generated result files should only be compared after the analyzer completes without an integrity error.

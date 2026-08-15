@@ -528,7 +528,7 @@ def main() -> int:
                                 "hybrid_and_pure_cpp_shared_core"
                             ),
                             "mean_absolute_error": (
-                                f"{metrics.mean_absolute_error:.6f}"
+                                repr(metrics.mean_absolute_error)
                             ),
                             "maximum_absolute_error": (
                                 metrics.maximum_absolute_error

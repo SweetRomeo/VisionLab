@@ -8,7 +8,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(OpenCV_DIR "C:/opencv/build")
+set(
+    OpenCV_DIR
+    "C:/opencv/build"
+    CACHE PATH
+    "OpenCV installation directory"
+)
 find_package(OpenCV REQUIRED)
 
 find_package(Qt6 REQUIRED COMPONENTS

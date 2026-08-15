@@ -252,7 +252,10 @@ def read_frame_at(
     capture: cv2.VideoCapture,
     frame_index: int,
 ) -> np.ndarray:
-    capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+    if not capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index):
+        raise RuntimeError(
+            f"Could not seek to video frame {frame_index}."
+        )
     frame_received, frame = capture.read()
 
     if not frame_received or frame is None or frame.size == 0:
@@ -528,7 +531,7 @@ def main() -> int:
                                 "hybrid_and_pure_cpp_shared_core"
                             ),
                             "mean_absolute_error": (
-                                f"{metrics.mean_absolute_error:.6f}"
+                                repr(metrics.mean_absolute_error)
                             ),
                             "maximum_absolute_error": (
                                 metrics.maximum_absolute_error

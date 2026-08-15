@@ -89,11 +89,9 @@ def load_measurements() -> list[Measurement]:
         result_path = RESULTS_DIRECTORY / file_name
 
         if not result_path.is_file():
-            print(
-                f"Warning: result file not found: "
-                f"{result_path}"
+            raise FileNotFoundError(
+                f"Required result file not found: {result_path}"
             )
-            continue
 
         with result_path.open(
             "r",

@@ -1,0 +1,50 @@
+{
+  "input": {
+    "video_path": "benchmarks/data/benchmark_input.mp4"
+  },
+  "benchmark": {
+    "warmup_frames": 30,
+    "measured_frames": 500,
+    "trials": 5
+  },
+  "resolutions": [
+    {
+      "width": 640,
+      "height": 480
+    },
+    {
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "width": 1920,
+      "height": 1080
+    }
+  ],
+  "algorithms": [
+    {
+      "name": "original",
+      "parameters": {}
+    },
+    {
+      "name": "gamma_correction",
+      "parameters": {
+        "gamma_value": 0.6
+      }
+    },
+    {
+      "name": "histogram_equalization",
+      "parameters": {}
+    },
+    {
+      "name": "clahe",
+      "parameters": {
+        "clip_limit": 4.0,
+        "grid_size": 8
+      }
+    }
+  ],
+  "output": {
+    "directory": "benchmarks/results"
+  }
+}

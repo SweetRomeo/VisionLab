@@ -211,6 +211,8 @@ def run_test_case(
                 interpolation=cv2.INTER_LINEAR,
             )
 
+            processed_frame = None
+
             start_time = perf_counter_ns()
 
             processed_frame = visionlab_cpp.process_frame(

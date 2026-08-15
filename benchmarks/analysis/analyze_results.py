@@ -1,4 +1,5 @@
 import csv
+import json
 import math
 from collections import defaultdict
 from dataclasses import dataclass
@@ -9,12 +10,18 @@ from statistics import fmean, median, pstdev
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIRECTORY = PROJECT_ROOT / "benchmarks" / "results"
 
-RESULT_FILES = [
-    "pure_python_results.csv",
-    "hybrid_results.csv",
-    "pure_cpp_results.csv",
-]
+CONFIG_PATH = (
+    PROJECT_ROOT
+    / "benchmarks"
+    / "config"
+    / "benchmark_config.json"
+)
 
+RESULT_FILES = {
+    "pure_python_results.csv": "pure_python",
+    "hybrid_results.csv": "hybrid",
+    "pure_cpp_results.csv": "pure_cpp",
+}
 
 @dataclass(frozen=True)
 class Measurement:
@@ -22,7 +29,144 @@ class Measurement:
     algorithm: str
     resolution: str
     trial: int
+    frame_index: int
     processing_time_ms: float
+
+def load_benchmark_expectations() -> tuple[
+    int,
+    int,
+    set[str],
+    set[str],
+]:
+    with CONFIG_PATH.open(
+        "r",
+        encoding="utf-8",
+    ) as config_file:
+        config = json.load(config_file)
+
+    measured_frames = int(
+        config["benchmark"]["measured_frames"]
+    )
+    trials = int(config["benchmark"]["trials"])
+
+    algorithms = {
+        algorithm["name"]
+        for algorithm in config["algorithms"]
+    }
+
+    resolutions = {
+        f'{resolution["width"]}x{resolution["height"]}'
+        for resolution in config["resolutions"]
+    }
+
+    if measured_frames <= 0 or trials <= 0:
+        raise ValueError(
+            "Measured frame and trial counts must be positive."
+        )
+
+    return (
+        measured_frames,
+        trials,
+        algorithms,
+        resolutions,
+    )
+
+
+def validate_measurements(
+    measurements: list[Measurement],
+) -> None:
+    (
+        measured_frames,
+        trial_count,
+        algorithms,
+        resolutions,
+    ) = load_benchmark_expectations()
+
+    architectures = set(RESULT_FILES.values())
+    expected_trials = set(range(1, trial_count + 1))
+    expected_frames = set(
+        range(1, measured_frames + 1)
+    )
+
+    groups = defaultdict(list)
+
+    for measurement in measurements:
+        if measurement.architecture not in architectures:
+            raise ValueError(
+                "Unexpected architecture: "
+                f"{measurement.architecture}"
+            )
+
+        if measurement.algorithm not in algorithms:
+            raise ValueError(
+                "Unexpected algorithm: "
+                f"{measurement.algorithm}"
+            )
+
+        if measurement.resolution not in resolutions:
+            raise ValueError(
+                "Unexpected resolution: "
+                f"{measurement.resolution}"
+            )
+
+        if measurement.trial not in expected_trials:
+            raise ValueError(
+                "Unexpected trial number: "
+                f"{measurement.trial}"
+            )
+
+        key = (
+            measurement.architecture,
+            measurement.algorithm,
+            measurement.resolution,
+            measurement.trial,
+        )
+        groups[key].append(measurement.frame_index)
+
+    expected_groups = {
+        (architecture, algorithm, resolution, trial)
+        for architecture in architectures
+        for algorithm in algorithms
+        for resolution in resolutions
+        for trial in expected_trials
+    }
+
+    missing_groups = expected_groups - set(groups)
+    unexpected_groups = set(groups) - expected_groups
+
+    if missing_groups:
+        raise ValueError(
+            "Missing benchmark groups: "
+            f"{sorted(missing_groups)[:5]}"
+        )
+
+    if unexpected_groups:
+        raise ValueError(
+            "Unexpected benchmark groups: "
+            f"{sorted(unexpected_groups)[:5]}"
+        )
+
+    for key, frame_indices in groups.items():
+        unique_frames = set(frame_indices)
+
+        if len(unique_frames) != len(frame_indices):
+            raise ValueError(
+                f"Duplicate frame indices in group {key}."
+            )
+
+        if unique_frames != expected_frames:
+            missing_frames = (
+                expected_frames - unique_frames
+            )
+            extra_frames = (
+                unique_frames - expected_frames
+            )
+
+            raise ValueError(
+                f"Invalid frames in group {key}. "
+                f"Missing: {sorted(missing_frames)[:5]}, "
+                f"extra: {sorted(extra_frames)[:5]}"
+            )
 
 
 def calculate_percentile(
@@ -85,7 +229,7 @@ def load_measurements() -> list[Measurement]:
         "processing_time_ms",
     }
 
-    for file_name in RESULT_FILES:
+    for file_name, expected_architecture in RESULT_FILES.items():
         result_path = RESULTS_DIRECTORY / file_name
 
         if not result_path.is_file():
@@ -116,6 +260,14 @@ def load_measurements() -> list[Measurement]:
                 )
 
             for row in reader:
+                architecture = row["architecture"].strip()
+
+                if architecture != expected_architecture:
+                    raise ValueError(
+                        f"Unexpected architecture in {result_path}: "
+                        f"expected {expected_architecture}, "
+                        f"received {architecture}"
+                    )
                 processing_time_ms = float(
                     row["processing_time_ms"]
                 )
@@ -132,10 +284,11 @@ def load_measurements() -> list[Measurement]:
 
                 measurements.append(
                     Measurement(
-                        architecture=row["architecture"],
+                        architecture=architecture,
                         algorithm=row["algorithm"],
                         resolution=row["resolution"],
                         trial=int(row["trial"]),
+                        frame_index=int(row["frame_index"]),
                         processing_time_ms=(
                             processing_time_ms
                         ),
@@ -299,6 +452,7 @@ def write_overall_summary(
 
 def main() -> None:
     measurements = load_measurements()
+    validate_measurements(measurements)
 
     trial_summary_path = write_trial_summary(
         measurements

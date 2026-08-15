@@ -45,7 +45,6 @@
     }
   ],
   "output": {
-    "directory": "benchmarks/results",
-    "save_per_frame_results": true
+    "directory": "benchmarks/results"
   }
 }

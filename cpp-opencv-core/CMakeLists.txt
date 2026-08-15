@@ -73,6 +73,7 @@ target_compile_definitions(
     PRIVATE
 
     VISIONLAB_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
+    VISIONLAB_BENCHMARK_RELEASE=$<IF:$<CONFIG:Release>,1,0>
 )
 
 if(WIN32)

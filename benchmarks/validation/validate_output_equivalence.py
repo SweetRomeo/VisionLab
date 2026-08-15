@@ -3,6 +3,7 @@ import csv
 import json
 import math
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,6 +47,82 @@ class EquivalenceMetrics:
     maximum_absolute_error: int
     psnr: float
     exact_match: bool
+
+
+def get_pure_python_interpreter_path() -> Path:
+    interpreter_path = (
+        PURE_PYTHON_DIRECTORY / ".venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else PURE_PYTHON_DIRECTORY / ".venv" / "bin" / "python"
+    )
+
+    if not interpreter_path.is_file():
+        raise FileNotFoundError(
+            "Pure Python virtual environment interpreter was "
+            "not found. Expected: "
+            f"{interpreter_path}"
+        )
+
+    return interpreter_path
+
+
+def read_runtime_dependency_versions(
+    python_executable: Path,
+) -> dict[str, str]:
+    command = [
+        str(python_executable),
+        "-c",
+        (
+            "import cv2, json, numpy as np, sys; "
+            "print(json.dumps({"
+            "'python': sys.version.split()[0], "
+            "'numpy': np.__version__, "
+            "'opencv': cv2.__version__"
+            "}))"
+        ),
+    ]
+    process = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    return json.loads(process.stdout)
+
+
+def validate_runtime_dependencies_match() -> None:
+    current_versions = {
+        "python": sys.version.split()[0],
+        "numpy": np.__version__,
+        "opencv": cv2.__version__,
+    }
+    pure_python_versions = read_runtime_dependency_versions(
+        get_pure_python_interpreter_path()
+    )
+    mismatches = [
+        dependency_name
+        for dependency_name in current_versions
+        if current_versions[dependency_name]
+        != pure_python_versions.get(dependency_name)
+    ]
+
+    if mismatches:
+        mismatch_message = ", ".join(
+            (
+                f"{dependency_name} "
+                f"(hybrid={current_versions[dependency_name]}, "
+                "pure_python="
+                f"{pure_python_versions.get(dependency_name)})"
+            )
+            for dependency_name in mismatches
+        )
+        raise RuntimeError(
+            "Output equivalence validation requires matching "
+            "runtime dependencies between the active environment "
+            "and pure-python/.venv. Mismatches: "
+            f"{mismatch_message}"
+        )
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -384,6 +461,7 @@ def format_psnr(psnr: float) -> str:
 def main() -> int:
     arguments = parse_arguments()
     config = load_config()
+    validate_runtime_dependencies_match()
     visionlab_cpp = import_cpp_module()
 
     cpp_algorithms = {

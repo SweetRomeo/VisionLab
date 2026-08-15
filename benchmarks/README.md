@@ -148,6 +148,10 @@ mean absolute error = 0
 maximum absolute error = 0
 ```
 
+The validation script also verifies that the active environment
+and `pure-python/.venv` use identical Python, NumPy, and OpenCV
+versions before running comparisons.
+
 ### Linux and macOS
 
 ```bash

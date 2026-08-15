@@ -550,7 +550,7 @@ def main() -> int:
                         f"{status} | {algorithm_name} | "
                         f"{resolution_name} | "
                         f"frame {frame_index} | "
-                        f"MAE {metrics.mean_absolute_error:.6f} | "
+                        f"MAE {metrics.mean_absolute_error:.12g} | "
                         "max error "
                         f"{metrics.maximum_absolute_error}"
                     )

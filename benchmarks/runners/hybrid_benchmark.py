@@ -20,6 +20,36 @@ CONFIG_PATH = (
 DLL_DIRECTORY_HANDLES = []
 
 
+def is_release_candidate(
+    candidate: Path,
+    build_directory: Path,
+) -> bool:
+    if "release" in str(candidate.parent).lower():
+        return True
+
+    cache_path = build_directory / "CMakeCache.txt"
+
+    if not cache_path.is_file():
+        return False
+
+    with cache_path.open(
+        "r",
+        encoding="utf-8",
+    ) as cache_file:
+        for line in cache_file:
+            if line.startswith(
+                "CMAKE_BUILD_TYPE:STRING="
+            ):
+                return (
+                    line.removeprefix(
+                        "CMAKE_BUILD_TYPE:STRING="
+                    ).strip().lower()
+                    == "release"
+                )
+
+    return False
+
+
 def find_module_directory() -> Path:
     configured_directory = os.getenv(
         "VISIONLAB_CPP_MODULE_DIR"
@@ -53,7 +83,10 @@ def find_module_directory() -> Path:
     release_candidates = [
         candidate
         for candidate in candidates
-        if "release" in str(candidate.parent).lower()
+        if is_release_candidate(
+            candidate,
+            build_directory,
+        )
     ]
 
     if not release_candidates:

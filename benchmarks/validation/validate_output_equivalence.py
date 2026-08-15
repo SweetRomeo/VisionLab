@@ -81,12 +81,19 @@ def read_runtime_dependency_versions(
             "}))"
         ),
     ]
-    process = subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        process = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        stderr_output = (error.stderr or "").strip()
+        raise RuntimeError(
+            "Could not read runtime dependencies from "
+            f"{python_executable}: {stderr_output or error}"
+        ) from error
 
     return json.loads(process.stdout)
 

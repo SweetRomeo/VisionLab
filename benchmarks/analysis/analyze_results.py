@@ -17,12 +17,11 @@ CONFIG_PATH = (
     / "benchmark_config.json"
 )
 
-RESULT_FILES = [
-    "pure_python_results.csv",
-    "hybrid_results.csv",
-    "pure_cpp_results.csv",
-]
-
+RESULT_FILES = {
+    "pure_python_results.csv": "pure_python",
+    "hybrid_results.csv": "hybrid",
+    "pure_cpp_results.csv": "pure_cpp",
+}
 
 @dataclass(frozen=True)
 class Measurement:

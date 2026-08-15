@@ -19,6 +19,10 @@
 #include <string>
 #include <vector>
 
+#ifndef VISIONLAB_PROJECT_ROOT
+#error "VISIONLAB_PROJECT_ROOT is not defined."
+#endif
+
 #ifndef VISIONLAB_BENCHMARK_RELEASE
 #define VISIONLAB_BENCHMARK_RELEASE 0
 #endif

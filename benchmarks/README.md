@@ -124,11 +124,95 @@ cmake \
 
 The benchmark executable must not be run from a Debug build. Debug execution is intentionally rejected by the application.
 
-## 5. Run benchmarks on Linux and macOS
+## 5. Validate output equivalence
+
+Output equivalence must be validated before running the official performance benchmarks.
+
+The validation script compares the Pure Python implementation against the shared C++ `ImageProcess` core used by both the Hybrid and Pure C++ implementations.
+
+It tests:
+
+* Five deterministic frames distributed across the benchmark video
+* Every algorithm defined in `benchmark_config.json`
+* Every configured resolution
+* Output shape and data type
+* Mean absolute error
+* Maximum absolute error
+* PSNR
+* Exact pixel equality
+
+The default validation requires exact pixel-level equality:
+
+```text
+mean absolute error = 0
+maximum absolute error = 0
+```
+
+The validation script also verifies that the active environment
+and `pure-python/.venv` use identical Python, NumPy, and OpenCV
+versions before running comparisons.
+
+### Linux and macOS
+
+```bash
+source hybrid-python-cpp/.venv/bin/activate
+
+python benchmarks/validation/validate_output_equivalence.py
+
+deactivate
+```
+
+### Windows PowerShell
+
+```powershell
+.\hybrid-python-cpp\.venv\Scripts\Activate.ps1
+
+python benchmarks\validation\validate_output_equivalence.py
+
+deactivate
+```
+
+### Windows Git Bash
+
+```bash
+source hybrid-python-cpp/.venv/Scripts/activate
+
+python benchmarks/validation/validate_output_equivalence.py
+
+deactivate
+```
+
+If the compiled C++ module is not discovered automatically, set `VISIONLAB_CPP_MODULE_DIR` to the directory containing `visionlab_cpp` before running the validation.
+
+A successful default validation finishes with:
+
+```text
+Output equivalence passed for 60 comparison(s).
+```
+
+The number of comparisons is calculated as:
+
+```text
+5 frames × 3 resolutions × 4 algorithms
+= 60 comparisons
+```
+
+Detailed results are written to:
+
+```text
+benchmarks/results/output_equivalence_results.csv
+```
+
+This generated CSV is ignored by Git and should not be committed.
+
+Do not increase the error tolerances unless the numerical differences have been investigated and scientifically justified.
+
+
+## 6. Run benchmarks on Linux and macOS
 
 Run the implementations in the following order.
 
-### 5.1. Pure Python
+### 6.1. Pure Python
 
 ```bash
 source pure-python/.venv/bin/activate
@@ -138,7 +222,7 @@ python benchmarks/runners/pure_python_benchmark.py
 deactivate
 ```
 
-### 5.2. Hybrid Python+C++
+### 6.2. Hybrid Python+C++
 
 Activate the Hybrid environment:
 
@@ -166,7 +250,7 @@ python benchmarks/runners/hybrid_benchmark.py
 deactivate
 ```
 
-### 5.3. Pure C++
+### 6.3. Pure C++
 
 For a single-config build:
 
@@ -180,7 +264,7 @@ For a multi-config build:
 ./cpp-opencv-core/build/Release/VisionLabCppBenchmark
 ```
 
-## 6. Windows setup and execution
+## 7. Windows setup and execution
 
 The recommended Windows configuration is a 64-bit MSVC kit with Release selected in Qt Creator.
 
@@ -192,7 +276,7 @@ build/Desktop_Qt_6_11_1_MSVC2022_64bit-Release
 
 Use the actual Release directory generated on your computer.
 
-### 6.1. PowerShell environments
+### 7.1. PowerShell environments
 
 If PowerShell prevents virtual-environment activation, allow scripts for the current terminal:
 
@@ -224,7 +308,7 @@ python -m pip install -r hybrid-python-cpp\requirements.txt
 deactivate
 ```
 
-### 6.2. Build with Qt Creator
+### 7.2. Build with Qt Creator
 
 For both `hybrid-python-cpp` and `cpp-opencv-core`:
 
@@ -236,7 +320,7 @@ For both `hybrid-python-cpp` and `cpp-opencv-core`:
 
 Do not use a Debug binary for official measurements.
 
-### 6.3. Run Pure Python in PowerShell
+### 7.3. Run Pure Python in PowerShell
 
 ```powershell
 .\pure-python\.venv\Scripts\Activate.ps1
@@ -246,7 +330,7 @@ python benchmarks\runners\pure_python_benchmark.py
 deactivate
 ```
 
-### 6.4. Locate and run the Hybrid module
+### 7.4. Locate and run the Hybrid module
 
 Locate the compiled module:
 
@@ -268,7 +352,7 @@ deactivate
 
 Replace `YOUR_RELEASE_DIRECTORY` with the directory reported by Qt Creator or the preceding search command.
 
-### 6.5. Locate and run the Pure C++ benchmark
+### 7.5. Locate and run the Pure C++ benchmark
 
 Locate the executable:
 
@@ -290,7 +374,7 @@ VisionLabCppBenchmark must be run in Release mode.
 
 Switch to the Release build before continuing.
 
-### 6.6. Git Bash on Windows
+### 7.6. Git Bash on Windows
 
 Run Pure Python:
 
@@ -320,7 +404,7 @@ Run Pure C++:
 ./cpp-opencv-core/build/YOUR_RELEASE_DIRECTORY/VisionLabCppBenchmark.exe
 ```
 
-## 7. Analyze the results
+## 8. Analyze the results
 
 Run the analyzer after all three benchmark runners finish successfully:
 
@@ -340,7 +424,7 @@ The analyzer validates the result files against the current benchmark configurat
 
 If the configuration changes, rerun all three implementations before analyzing the results.
 
-## 8. Expected output files
+## 9. Expected output files
 
 After a successful benchmark and analysis run, `benchmarks/results/` must contain:
 
@@ -363,7 +447,7 @@ With the default configuration, each architecture produces:
 
 Warm-up frames are not written to the result files.
 
-## 9. Fair-comparison requirements
+## 10. Fair-comparison requirements
 
 For scientifically meaningful results:
 

@@ -252,7 +252,10 @@ def read_frame_at(
     capture: cv2.VideoCapture,
     frame_index: int,
 ) -> np.ndarray:
-    capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+    if not capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index):
+        raise RuntimeError(
+            f"Could not seek to video frame {frame_index}."
+        )
     frame_received, frame = capture.read()
 
     if not frame_received or frame is None or frame.size == 0:

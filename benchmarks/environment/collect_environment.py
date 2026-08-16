@@ -712,12 +712,12 @@ def main() -> None:
         / "environment_metadata.json"
     )
 
-    hybrid_module_dir_env = os.environ.get(
-        "VISIONLAB_CPP_MODULE_DIR"
+    hybrid_build_dir_env = os.environ.get(
+        "VISIONLAB_HYBRID_MODULE_DIR"
     )
     hybrid_build_dir = (
-        Path(hybrid_module_dir_env).resolve()
-        if hybrid_module_dir_env
+        Path(hybrid_build_dir_env).resolve()
+        if hybrid_build_dir_env
         else None
     )
 
@@ -772,7 +772,9 @@ def main() -> None:
                 HYBRID_PROJECT_DIRECTORY,
                 include_qt=False,
                 explicit_build_dir=hybrid_build_dir,
-                build_dir_env_var="VISIONLAB_CPP_MODULE_DIR",
+            build_dir_env_var=(
+                "VISIONLAB_HYBRID_BUILD_DIR"
+                ),
             ),
         },
         "repository": collect_git_information(),

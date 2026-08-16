@@ -234,6 +234,20 @@ The generated metadata is written to:
 benchmarks/results/environment_metadata.json
 ```
 
+If multiple Release build directories exist, select the exact
+build directories used for the experiment:
+
+```bash
+export VISIONLAB_CPP_BUILD_DIR="/absolute/path/to/cpp-build"
+export VISIONLAB_HYBRID_BUILD_DIR="/absolute/path/to/hybrid-build"
+```
+
+The powershell version of those commands are:
+```powershell
+$env:VISIONLAB_CPP_BUILD_DIR="C:\path\to\cpp-build"
+$env:VISIONLAB_HYBRID_BUILD_DIR="C:\path\to\hybrid-build"
+```
+
 For an official experiment, run the collector from the exact Git commit used by all benchmark implementations. The working tree should be clean before collecting the final metadata.
 
 A successful run prints:

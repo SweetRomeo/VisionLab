@@ -366,6 +366,26 @@ def detect_qt_version(
         if match:
             return match.group(1)
 
+    # Fall back to reading the Qt6 config-version file when the path does
+    # not contain a version segment (e.g. distro or Homebrew installs).
+    qt6_dir = cache_values.get("Qt6_DIR", "")
+    if qt6_dir:
+        config_version_file = (
+            Path(qt6_dir) / "Qt6ConfigVersion.cmake"
+        )
+        if config_version_file.is_file():
+            version_file_pattern = re.compile(
+                r'set\s*\(\s*PACKAGE_VERSION\s+"?(\d+\.\d+\.\d+)"?\s*\)',
+                re.IGNORECASE,
+            )
+            try:
+                content = config_version_file.read_text(encoding="utf-8")
+                file_match = version_file_pattern.search(content)
+                if file_match:
+                    return file_match.group(1)
+            except OSError:
+                pass
+
     return None
 
 def detect_opencv_version(

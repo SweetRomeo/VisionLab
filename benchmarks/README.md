@@ -471,9 +471,10 @@ hybrid_results.csv
 pure_cpp_results.csv
 benchmark_trial_summary.csv
 benchmark_summary.csv
+environment_metadata.json
 ```
 
-The first three files contain per-frame measurements. The final two files contain trial-level and overall statistics.
+The first three files contain per-frame measurements. The next two files contain trial-level and overall statistics. The final file contains environment metadata recorded by `collect_environment.py`.
 
 With the default configuration, each architecture produces:
 

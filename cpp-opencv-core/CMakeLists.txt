@@ -82,9 +82,16 @@ target_compile_definitions(
 )
 
 if(WIN32)
+    set(
+        OPENCV_RUNTIME_DIR
+        "${OpenCV_DIR}/x64/vc16/bin"
+        CACHE PATH
+        "OpenCV runtime DLL directory"
+    )
+
     file(
         GLOB OPENCV_RUNTIME_DLLS
-        "C:/opencv/build/x64/vc16/bin/*.dll"
+        "${OPENCV_RUNTIME_DIR}/*.dll"
     )
 
     if(OPENCV_RUNTIME_DLLS)

@@ -245,7 +245,23 @@ def parse_cmake_cache(
 
 def find_release_cmake_cache(
     project_directory: Path,
+    explicit_build_dir: Optional[Path] = None,
+    build_dir_env_var: Optional[str] = None,
 ) -> Path:
+    if explicit_build_dir is not None:
+        cache_path = (
+            explicit_build_dir / "CMakeCache.txt"
+        )
+
+        if not cache_path.is_file():
+            raise FileNotFoundError(
+                "CMakeCache.txt was not found in the "
+                f"specified build directory: "
+                f"{explicit_build_dir}"
+            )
+
+        return cache_path
+
     build_directory = project_directory / "build"
 
     if not build_directory.is_dir():
@@ -293,10 +309,25 @@ def find_release_cmake_cache(
             f"{project_directory.name}"
         )
 
-    return max(
-        release_caches,
-        key=lambda path: path.stat().st_mtime,
-    )
+    if len(release_caches) > 1:
+        cache_list = "\n".join(
+            f"  {p}" for p in sorted(release_caches)
+        )
+        env_var_hint = (
+            f" Set {build_dir_env_var} to the exact "
+            f"build directory to disambiguate."
+            if build_dir_env_var
+            else " Specify the exact build directory via "
+            "the appropriate environment variable to "
+            "disambiguate."
+        )
+        raise RuntimeError(
+            f"Multiple Release CMake caches were found "
+            f"for {project_directory.name}.{env_var_hint}"
+            f"\n{cache_list}"
+        )
+
+    return release_caches[0]
 
 
 def read_cmake_set_value(
@@ -420,9 +451,9 @@ def collect_compiler_information(
             "version": None,
         }
 
-    compiler_file = max(
+    compiler_file = min(
         compiler_files,
-        key=lambda path: path.stat().st_mtime,
+        key=lambda path: len(path.parts),
     )
     content = compiler_file.read_text(
         encoding="utf-8",
@@ -444,9 +475,13 @@ def collect_compiler_information(
 def collect_cmake_build(
     project_directory: Path,
     include_qt: bool,
+    explicit_build_dir: Optional[Path] = None,
+    build_dir_env_var: Optional[str] = None,
 ) -> dict:
     cache_path = find_release_cmake_cache(
-        project_directory
+        project_directory,
+        explicit_build_dir,
+        build_dir_env_var,
     )
     cache_values = parse_cmake_cache(cache_path)
 
@@ -627,6 +662,24 @@ def main() -> None:
         / "environment_metadata.json"
     )
 
+    hybrid_module_dir_env = os.environ.get(
+        "VISIONLAB_CPP_MODULE_DIR"
+    )
+    hybrid_build_dir = (
+        Path(hybrid_module_dir_env).resolve()
+        if hybrid_module_dir_env
+        else None
+    )
+
+    cpp_build_dir_env = os.environ.get(
+        "VISIONLAB_CPP_BUILD_DIR"
+    )
+    cpp_build_dir = (
+        Path(cpp_build_dir_env).resolve()
+        if cpp_build_dir_env
+        else None
+    )
+
     metadata = {
         "schema_version": 1,
         "collected_at_utc": (
@@ -662,10 +715,14 @@ def main() -> None:
             "pure_cpp": collect_cmake_build(
                 CPP_PROJECT_DIRECTORY,
                 include_qt=True,
+                explicit_build_dir=cpp_build_dir,
+                build_dir_env_var="VISIONLAB_CPP_BUILD_DIR",
             ),
             "hybrid_python_cpp": collect_cmake_build(
                 HYBRID_PROJECT_DIRECTORY,
                 include_qt=False,
+                explicit_build_dir=hybrid_build_dir,
+                build_dir_env_var="VISIONLAB_CPP_MODULE_DIR",
             ),
         },
         "repository": collect_git_information(),

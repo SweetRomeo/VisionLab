@@ -207,12 +207,63 @@ This generated CSV is ignored by Git and should not be committed.
 
 Do not increase the error tolerances unless the numerical differences have been investigated and scientifically justified.
 
+## 6. Collect environment metadata
 
-## 6. Run benchmarks on Linux and macOS
+Collect the benchmark environment metadata before running the official performance measurements.
+
+The metadata collector records:
+
+* Operating system and system architecture
+* CPU model, logical CPU count and total memory
+* Pure Python and Hybrid Python environment versions
+* NumPy and OpenCV versions
+* Release build type and CMake generator
+* CMake, C++ compiler, OpenCV and Qt versions
+* Git commit, branch and working-tree state
+* SHA-256 hashes of the benchmark configuration and input video
+
+Run the collector from the repository root:
+
+```bash
+python benchmarks/environment/collect_environment.py
+```
+
+The generated metadata is written to:
+
+```text
+benchmarks/results/environment_metadata.json
+```
+
+If multiple Release build directories exist, select the exact
+build directories used for the experiment:
+
+```bash
+export VISIONLAB_CPP_BUILD_DIR="/absolute/path/to/cpp-build"
+export VISIONLAB_HYBRID_BUILD_DIR="/absolute/path/to/hybrid-build"
+```
+
+The powershell version of those commands are:
+```powershell
+$env:VISIONLAB_CPP_BUILD_DIR="C:\path\to\cpp-build"
+$env:VISIONLAB_HYBRID_BUILD_DIR="C:\path\to\hybrid-build"
+```
+
+For an official experiment, run the collector from the exact Git commit used by all benchmark implementations. The working tree should be clean before collecting the final metadata.
+
+A successful run prints:
+
+```text
+Environment metadata created: benchmarks/results/environment_metadata.json
+```
+
+The generated JSON file contains no username, hostname or user-specific absolute paths. It is ignored by Git and should not be included in normal source commits.
+
+
+## 7. Run benchmarks on Linux and macOS
 
 Run the implementations in the following order.
 
-### 6.1. Pure Python
+### 7.1. Pure Python
 
 ```bash
 source pure-python/.venv/bin/activate
@@ -222,7 +273,7 @@ python benchmarks/runners/pure_python_benchmark.py
 deactivate
 ```
 
-### 6.2. Hybrid Python+C++
+### 7.2. Hybrid Python+C++
 
 Activate the Hybrid environment:
 
@@ -250,7 +301,7 @@ python benchmarks/runners/hybrid_benchmark.py
 deactivate
 ```
 
-### 6.3. Pure C++
+### 7.3. Pure C++
 
 For a single-config build:
 
@@ -264,7 +315,7 @@ For a multi-config build:
 ./cpp-opencv-core/build/Release/VisionLabCppBenchmark
 ```
 
-## 7. Windows setup and execution
+## 8. Windows setup and execution
 
 The recommended Windows configuration is a 64-bit MSVC kit with Release selected in Qt Creator.
 
@@ -276,7 +327,7 @@ build/Desktop_Qt_6_11_1_MSVC2022_64bit-Release
 
 Use the actual Release directory generated on your computer.
 
-### 7.1. PowerShell environments
+### 8.1. PowerShell environments
 
 If PowerShell prevents virtual-environment activation, allow scripts for the current terminal:
 
@@ -308,7 +359,7 @@ python -m pip install -r hybrid-python-cpp\requirements.txt
 deactivate
 ```
 
-### 7.2. Build with Qt Creator
+### 8.2. Build with Qt Creator
 
 For both `hybrid-python-cpp` and `cpp-opencv-core`:
 
@@ -320,7 +371,7 @@ For both `hybrid-python-cpp` and `cpp-opencv-core`:
 
 Do not use a Debug binary for official measurements.
 
-### 7.3. Run Pure Python in PowerShell
+### 8.3. Run Pure Python in PowerShell
 
 ```powershell
 .\pure-python\.venv\Scripts\Activate.ps1
@@ -330,7 +381,7 @@ python benchmarks\runners\pure_python_benchmark.py
 deactivate
 ```
 
-### 7.4. Locate and run the Hybrid module
+### 8.4. Locate and run the Hybrid module
 
 Locate the compiled module:
 
@@ -352,7 +403,7 @@ deactivate
 
 Replace `YOUR_RELEASE_DIRECTORY` with the directory reported by Qt Creator or the preceding search command.
 
-### 7.5. Locate and run the Pure C++ benchmark
+### 8.5. Locate and run the Pure C++ benchmark
 
 Locate the executable:
 
@@ -374,7 +425,7 @@ VisionLabCppBenchmark must be run in Release mode.
 
 Switch to the Release build before continuing.
 
-### 7.6. Git Bash on Windows
+### 8.6. Git Bash on Windows
 
 Run Pure Python:
 
@@ -404,7 +455,7 @@ Run Pure C++:
 ./cpp-opencv-core/build/YOUR_RELEASE_DIRECTORY/VisionLabCppBenchmark.exe
 ```
 
-## 8. Analyze the results
+## 9. Analyze the results
 
 Run the analyzer after all three benchmark runners finish successfully:
 
@@ -424,7 +475,7 @@ The analyzer validates the result files against the current benchmark configurat
 
 If the configuration changes, rerun all three implementations before analyzing the results.
 
-## 9. Expected output files
+## 10. Expected output files
 
 After a successful benchmark and analysis run, `benchmarks/results/` must contain:
 
@@ -434,9 +485,10 @@ hybrid_results.csv
 pure_cpp_results.csv
 benchmark_trial_summary.csv
 benchmark_summary.csv
+environment_metadata.json
 ```
 
-The first three files contain per-frame measurements. The final two files contain trial-level and overall statistics.
+The first three files contain per-frame measurements. The next two files contain trial-level and overall statistics. The final file contains environment metadata recorded by `collect_environment.py`.
 
 With the default configuration, each architecture produces:
 
@@ -447,7 +499,7 @@ With the default configuration, each architecture produces:
 
 Warm-up frames are not written to the result files.
 
-## 10. Fair-comparison requirements
+## 11. Fair-comparison requirements
 
 For scientifically meaningful results:
 

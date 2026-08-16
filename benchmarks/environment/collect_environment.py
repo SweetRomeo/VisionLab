@@ -374,19 +374,20 @@ def detect_qt_version(
             Path(qt6_dir) / "Qt6ConfigVersion.cmake"
         )
         if config_version_file.is_file():
-            version_file_pattern = re.compile(
+            config_version_pattern = re.compile(
                 r'set\s*\(\s*PACKAGE_VERSION\s+"?(\d+\.\d+\.\d+)"?\s*\)',
                 re.IGNORECASE,
             )
             try:
                 content = config_version_file.read_text(encoding="utf-8")
-                file_match = version_file_pattern.search(content)
+                file_match = config_version_pattern.search(content)
                 if file_match:
                     return file_match.group(1)
             except OSError:
                 pass
 
     return None
+
 
 def detect_opencv_version(
     cache_values: dict[str, str],

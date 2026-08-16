@@ -267,10 +267,23 @@ def find_release_cmake_cache(
             "",
         )
 
-        if (
-            build_type.lower() == "release"
-            or "release"
-            in cache_path.parent.name.lower()
+        config_types = cache_values.get(
+            "CMAKE_CONFIGURATION_TYPES",
+            "",
+        )
+        is_multi_config = bool(config_types)
+        has_release_config_type = (
+            "release"
+            in [t.lower() for t in config_types.split(";")]
+        )
+        release_artifact_exists = (
+            cache_path.parent / "Release"
+        ).is_dir()
+
+        if build_type.lower() == "release" or (
+            is_multi_config
+            and has_release_config_type
+            and release_artifact_exists
         ):
             release_caches.append(cache_path)
 

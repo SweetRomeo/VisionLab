@@ -586,6 +586,35 @@ def get_processor_name() -> str:
         except OSError:
             pass
 
+    system = platform.system()
+
+    if system == "Darwin":
+        try:
+            processor_name = run_command(
+                ["sysctl", "-n", "machdep.cpu.brand_string"]
+            )
+            if processor_name:
+                return " ".join(processor_name.split())
+        except RuntimeError:
+            pass
+
+    if system == "Linux":
+        try:
+            cpu_info = Path("/proc/cpuinfo").read_text(
+                encoding="utf-8",
+                errors="replace",
+            )
+            for line in cpu_info.splitlines():
+                key, separator, value = line.partition(":")
+                if (
+                    separator
+                    and key.strip().lower()
+                    in {"model name", "hardware"}
+                ):
+                    return " ".join(value.split())
+        except OSError:
+            pass
+
     return (
         platform.processor().strip()
         or os.environ.get(

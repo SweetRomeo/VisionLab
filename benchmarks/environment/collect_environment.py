@@ -713,7 +713,7 @@ def main() -> None:
     )
 
     hybrid_build_dir_env = os.environ.get(
-        "VISIONLAB_HYBRID_MODULE_DIR"
+        "VISIONLAB_HYBRID_BUILD_DIR"
     )
     hybrid_build_dir = (
         Path(hybrid_build_dir_env).resolve()
@@ -772,8 +772,8 @@ def main() -> None:
                 HYBRID_PROJECT_DIRECTORY,
                 include_qt=False,
                 explicit_build_dir=hybrid_build_dir,
-            build_dir_env_var=(
-                "VISIONLAB_HYBRID_BUILD_DIR"
+                build_dir_env_var=(
+                    "VISIONLAB_HYBRID_BUILD_DIR"
                 ),
             ),
         },

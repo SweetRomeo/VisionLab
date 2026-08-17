@@ -258,12 +258,105 @@ Environment metadata created: benchmarks/results/environment_metadata.json
 
 The generated JSON file contains no username, hostname or user-specific absolute paths. It is ignored by Git and should not be included in normal source commits.
 
+## 7. Resource-monitored benchmark orchestration
 
-## 7. Run benchmarks on Linux and macOS
+The recommended way to run the complete benchmark suite is through the resource-monitoring orchestrator.
+
+The orchestrator:
+
+* Runs the Pure Python benchmark
+* Runs the Hybrid Python+C++ benchmark
+* Runs the Pure C++ Release benchmark
+* Samples process CPU and memory usage every 0.1 seconds
+* Includes recursively discovered child processes
+* Rejects benchmark processes that return a non-zero exit code
+* Runs the existing result-integrity analyzer
+* Writes an architecture-level resource summary
+
+The monitoring dependency is defined in:
+
+```text
+benchmarks/requirements.txt
+```
+
+### Linux and macOS
+
+```bash
+source hybrid-python-cpp/.venv/bin/activate
+
+python -m pip install -r benchmarks/requirements.txt
+
+export VISIONLAB_CPP_BUILD_DIR="/absolute/path/to/cpp-release-build"
+export VISIONLAB_CPP_MODULE_DIR="/absolute/path/to/hybrid-release-module"
+
+python benchmarks/orchestration/run_benchmarks.py
+
+deactivate
+```
+
+### Windows PowerShell
+
+```powershell
+.\hybrid-python-cpp\.venv\Scripts\Activate.ps1
+
+python -m pip install -r benchmarks\requirements.txt
+
+$env:VISIONLAB_CPP_BUILD_DIR="C:\path\to\cpp-release-build"
+$env:VISIONLAB_CPP_MODULE_DIR="C:\path\to\hybrid-release-module"
+
+python benchmarks\orchestration\run_benchmarks.py
+
+deactivate
+```
+
+### Windows Git Bash
+
+```bash
+source hybrid-python-cpp/.venv/Scripts/activate
+
+python -m pip install -r benchmarks/requirements.txt
+
+export VISIONLAB_CPP_BUILD_DIR="C:/path/to/cpp-release-build"
+export VISIONLAB_CPP_MODULE_DIR="C:/path/to/hybrid-release-module"
+
+python benchmarks/orchestration/run_benchmarks.py
+
+deactivate
+```
+
+The Pure C++ build directory must contain the Release `VisionLabCppBenchmark` executable. The Hybrid module directory must contain the compiled `visionlab_cpp` `.pyd` or `.so` module.
+
+The generated resource summary is written to:
+
+```text
+benchmarks/results/benchmark_resource_summary.csv
+```
+
+It contains:
+
+```text
+architecture
+wall_time_seconds
+cpu_time_seconds
+average_cpu_percent
+peak_rss_mib
+sample_count
+sampling_interval_seconds
+exit_code
+```
+
+`average_cpu_percent` uses the process-level `psutil` convention, where approximately 100 percent represents one fully utilized logical CPU core. Multi-threaded processing may therefore report values greater than 100 percent.
+
+`peak_rss_mib` is the maximum combined resident memory observed for the benchmark process and its discovered child processes.
+
+Resource monitoring is performed outside the existing per-frame timed processing regions. The original processing-time and effective-FPS measurements therefore remain unchanged.
+
+
+## 8. Run benchmarks on Linux and macOS
 
 Run the implementations in the following order.
 
-### 7.1. Pure Python
+### 8.1. Pure Python
 
 ```bash
 source pure-python/.venv/bin/activate
@@ -273,7 +366,7 @@ python benchmarks/runners/pure_python_benchmark.py
 deactivate
 ```
 
-### 7.2. Hybrid Python+C++
+### 8.2. Hybrid Python+C++
 
 Activate the Hybrid environment:
 
@@ -301,7 +394,7 @@ python benchmarks/runners/hybrid_benchmark.py
 deactivate
 ```
 
-### 7.3. Pure C++
+### 8.3. Pure C++
 
 For a single-config build:
 
@@ -315,7 +408,7 @@ For a multi-config build:
 ./cpp-opencv-core/build/Release/VisionLabCppBenchmark
 ```
 
-## 8. Windows setup and execution
+## 9. Windows setup and execution
 
 The recommended Windows configuration is a 64-bit MSVC kit with Release selected in Qt Creator.
 
@@ -327,7 +420,7 @@ build/Desktop_Qt_6_11_1_MSVC2022_64bit-Release
 
 Use the actual Release directory generated on your computer.
 
-### 8.1. PowerShell environments
+### 9.1. PowerShell environments
 
 If PowerShell prevents virtual-environment activation, allow scripts for the current terminal:
 
@@ -359,7 +452,7 @@ python -m pip install -r hybrid-python-cpp\requirements.txt
 deactivate
 ```
 
-### 8.2. Build with Qt Creator
+### 9.2. Build with Qt Creator
 
 For both `hybrid-python-cpp` and `cpp-opencv-core`:
 
@@ -371,7 +464,7 @@ For both `hybrid-python-cpp` and `cpp-opencv-core`:
 
 Do not use a Debug binary for official measurements.
 
-### 8.3. Run Pure Python in PowerShell
+### 9.3. Run Pure Python in PowerShell
 
 ```powershell
 .\pure-python\.venv\Scripts\Activate.ps1
@@ -381,7 +474,7 @@ python benchmarks\runners\pure_python_benchmark.py
 deactivate
 ```
 
-### 8.4. Locate and run the Hybrid module
+### 9.4. Locate and run the Hybrid module
 
 Locate the compiled module:
 
@@ -403,7 +496,7 @@ deactivate
 
 Replace `YOUR_RELEASE_DIRECTORY` with the directory reported by Qt Creator or the preceding search command.
 
-### 8.5. Locate and run the Pure C++ benchmark
+### 9.5. Locate and run the Pure C++ benchmark
 
 Locate the executable:
 
@@ -425,7 +518,7 @@ VisionLabCppBenchmark must be run in Release mode.
 
 Switch to the Release build before continuing.
 
-### 8.6. Git Bash on Windows
+### 9.6. Git Bash on Windows
 
 Run Pure Python:
 
@@ -455,7 +548,7 @@ Run Pure C++:
 ./cpp-opencv-core/build/YOUR_RELEASE_DIRECTORY/VisionLabCppBenchmark.exe
 ```
 
-## 9. Analyze the results
+## 10. Analyze the results
 
 Run the analyzer after all three benchmark runners finish successfully:
 
@@ -475,7 +568,7 @@ The analyzer validates the result files against the current benchmark configurat
 
 If the configuration changes, rerun all three implementations before analyzing the results.
 
-## 10. Expected output files
+## 11. Expected output files
 
 After a successful benchmark and analysis run, `benchmarks/results/` must contain:
 
@@ -499,7 +592,7 @@ With the default configuration, each architecture produces:
 
 Warm-up frames are not written to the result files.
 
-## 11. Fair-comparison requirements
+## 12. Fair-comparison requirements
 
 For scientifically meaningful results:
 

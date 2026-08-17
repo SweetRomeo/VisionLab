@@ -568,6 +568,14 @@ The analyzer validates the result files against the current benchmark configurat
 
 If the configuration changes, rerun all three implementations before analyzing the results.
 
+### 10.1. Generate comparative metrics and figures
+
+After the analyzer and resource-monitored benchmark run complete successfully, generate the comparative metrics and figures:
+
+```bash
+python benchmarks/analysis/generate_visualizations.py
+```
+
 ## 11. Expected output files
 
 After a successful benchmark and analysis run, `benchmarks/results/` must contain:
@@ -580,6 +588,8 @@ benchmark_trial_summary.csv
 benchmark_summary.csv
 benchmark_resource_summary.csv
 environment_metadata.json
+benchmark_comparison.csv
+figures/
 ```
 
 The first three files contain per-frame measurements. `benchmark_trial_summary.csv` and `benchmark_summary.csv` contain trial-level and overall statistics. `benchmark_resource_summary.csv` contains architecture-level wall-clock time, CPU time, average CPU utilization, peak resident memory, sampling information, and process exit status. `environment_metadata.json` contains the experimental environment metadata recorded by `collect_environment.py`.

@@ -4,7 +4,9 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import fmean, stdev
 
+from scipy.stats import t as student_t
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -34,6 +36,11 @@ OVERALL_SUMMARY_PATH = (
 RESOURCE_SUMMARY_PATH = (
     RESULTS_DIRECTORY
     / "benchmark_resource_summary.csv"
+)
+
+COMPARISON_OUTPUT_PATH = (
+    RESULTS_DIRECTORY
+    / "benchmark_comparison.csv"
 )
 
 EXPECTED_ARCHITECTURES = (
@@ -78,6 +85,18 @@ class ResourceSummary:
     sampling_interval_seconds: float
     exit_code: int
 
+@dataclass(frozen=True)
+class ComparisonSummary:
+    architecture: str
+    algorithm: str
+    resolution: str
+    trial_count: int
+    mean_processing_time_ms: float
+    confidence_interval_95_lower_ms: float
+    confidence_interval_95_upper_ms: float
+    effective_fps: float
+    speedup_vs_pure_python: float
+    overhead_vs_pure_cpp_percent: float
 
 def read_csv_rows(
     input_path: Path,
@@ -574,6 +593,246 @@ def validate_experiment_coverage(
             f"found {len(overall_summaries)}."
         )
 
+def calculate_confidence_interval(
+    values: list[float],
+) -> tuple[float, float, float]:
+    if len(values) < 2:
+        raise ValueError(
+            "At least two trial values are required "
+            "for a confidence interval."
+        )
+
+    mean_value = fmean(values)
+    standard_error = (
+        stdev(values) / math.sqrt(len(values))
+    )
+
+    critical_value = float(
+        student_t.ppf(
+            0.975,
+            df=len(values) - 1,
+        )
+    )
+
+    if not math.isfinite(critical_value):
+        raise ValueError(
+            "The confidence-interval critical value "
+            "is not finite."
+        )
+
+    margin = critical_value * standard_error
+
+    return (
+        mean_value,
+        mean_value - margin,
+        mean_value + margin,
+    )
+
+
+def resolution_sort_key(
+    resolution: str,
+) -> tuple[int, int]:
+    try:
+        width_text, height_text = resolution.split(
+            "x",
+            maxsplit=1,
+        )
+        return int(width_text), int(height_text)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"Invalid resolution: {resolution!r}"
+        ) from error
+
+
+def build_comparison_summaries(
+    trial_summaries: list[TrialSummary],
+) -> list[ComparisonSummary]:
+    values_by_group = defaultdict(list)
+
+    for summary in trial_summaries:
+        key = (
+            summary.architecture,
+            summary.algorithm,
+            summary.resolution,
+        )
+
+        values_by_group[key].append(
+            summary.mean_ms
+        )
+
+    group_means = {
+        key: fmean(values)
+        for key, values in values_by_group.items()
+    }
+
+    architecture_order = {
+        architecture: index
+        for index, architecture
+        in enumerate(EXPECTED_ARCHITECTURES)
+    }
+
+    sorted_keys = sorted(
+        values_by_group,
+        key=lambda key: (
+            key[1],
+            resolution_sort_key(key[2]),
+            architecture_order[key[0]],
+        ),
+    )
+
+    comparisons = []
+
+    for architecture, algorithm, resolution in sorted_keys:
+        key = (
+            architecture,
+            algorithm,
+            resolution,
+        )
+        trial_values = values_by_group[key]
+
+        (
+            mean_ms,
+            confidence_lower_ms,
+            confidence_upper_ms,
+        ) = calculate_confidence_interval(
+            trial_values
+        )
+
+        pure_python_key = (
+            "pure_python",
+            algorithm,
+            resolution,
+        )
+        pure_cpp_key = (
+            "pure_cpp",
+            algorithm,
+            resolution,
+        )
+
+        pure_python_mean = group_means[
+            pure_python_key
+        ]
+        pure_cpp_mean = group_means[
+            pure_cpp_key
+        ]
+
+        if (
+            mean_ms <= 0.0
+            or pure_python_mean <= 0.0
+            or pure_cpp_mean <= 0.0
+        ):
+            raise ValueError(
+                "Processing-time means must be "
+                f"positive for {key}."
+            )
+
+        comparisons.append(
+            ComparisonSummary(
+                architecture=architecture,
+                algorithm=algorithm,
+                resolution=resolution,
+                trial_count=len(trial_values),
+                mean_processing_time_ms=mean_ms,
+                confidence_interval_95_lower_ms=(
+                    confidence_lower_ms
+                ),
+                confidence_interval_95_upper_ms=(
+                    confidence_upper_ms
+                ),
+                effective_fps=1000.0 / mean_ms,
+                speedup_vs_pure_python=(
+                    pure_python_mean / mean_ms
+                ),
+                overhead_vs_pure_cpp_percent=(
+                    (
+                        mean_ms - pure_cpp_mean
+                    )
+                    / pure_cpp_mean
+                    * 100.0
+                ),
+            )
+        )
+
+    return comparisons
+
+
+def write_comparison_summaries(
+    comparisons: list[ComparisonSummary],
+) -> Path:
+    if not comparisons:
+        raise ValueError(
+            "No benchmark comparisons were generated."
+        )
+
+    temporary_path = (
+        COMPARISON_OUTPUT_PATH.with_suffix(
+            ".csv.tmp"
+        )
+    )
+
+    fieldnames = [
+        "architecture",
+        "algorithm",
+        "resolution",
+        "trial_count",
+        "mean_processing_time_ms",
+        "confidence_interval_95_lower_ms",
+        "confidence_interval_95_upper_ms",
+        "effective_fps",
+        "speedup_vs_pure_python",
+        "overhead_vs_pure_cpp_percent",
+    ]
+
+    with temporary_path.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as output_file:
+        writer = csv.DictWriter(
+            output_file,
+            fieldnames=fieldnames,
+        )
+        writer.writeheader()
+
+        for comparison in comparisons:
+            writer.writerow(
+                {
+                    "architecture": (
+                        comparison.architecture
+                    ),
+                    "algorithm": comparison.algorithm,
+                    "resolution": (
+                        comparison.resolution
+                    ),
+                    "trial_count": (
+                        comparison.trial_count
+                    ),
+                    "mean_processing_time_ms": (
+                        f"{comparison.mean_processing_time_ms:.6f}"
+                    ),
+                    "confidence_interval_95_lower_ms": (
+                        f"{comparison.confidence_interval_95_lower_ms:.6f}"
+                    ),
+                    "confidence_interval_95_upper_ms": (
+                        f"{comparison.confidence_interval_95_upper_ms:.6f}"
+                    ),
+                    "effective_fps": (
+                        f"{comparison.effective_fps:.6f}"
+                    ),
+                    "speedup_vs_pure_python": (
+                        f"{comparison.speedup_vs_pure_python:.6f}"
+                    ),
+                    "overhead_vs_pure_cpp_percent": (
+                        f"{comparison.overhead_vs_pure_cpp_percent:.6f}"
+                    ),
+                }
+            )
+
+    temporary_path.replace(
+        COMPARISON_OUTPUT_PATH
+    )
+
+    return COMPARISON_OUTPUT_PATH
 
 def main() -> None:
     trial_summaries = load_trial_summaries()
@@ -583,6 +842,16 @@ def main() -> None:
     validate_experiment_coverage(
         trial_summaries,
         overall_summaries,
+    )
+
+    comparisons = build_comparison_summaries(
+        trial_summaries
+    )
+
+    comparison_output_path = (
+        write_comparison_summaries(
+            comparisons
+        )
     )
 
     print("Visualization inputs validated.")
@@ -595,7 +864,10 @@ def main() -> None:
     print(
         f"Resource summaries: {len(resource_summaries)}"
     )
-
+    print(
+        "Comparison summary created: "
+        f"{comparison_output_path}"
+    )
 
 if __name__ == "__main__":
     main()

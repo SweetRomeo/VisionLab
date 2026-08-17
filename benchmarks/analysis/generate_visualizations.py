@@ -7,6 +7,13 @@ from pathlib import Path
 from statistics import fmean, stdev
 
 from scipy.stats import t as student_t
+from collections.abc import Callable, Sequence
+
+import matplotlib
+
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,6 +49,32 @@ COMPARISON_OUTPUT_PATH = (
     RESULTS_DIRECTORY
     / "benchmark_comparison.csv"
 )
+
+FIGURES_DIRECTORY = (
+    RESULTS_DIRECTORY
+    / "figures"
+)
+
+ARCHITECTURE_LABELS = {
+    "pure_python": "Pure Python",
+    "hybrid": "Hybrid Python+C++",
+    "pure_cpp": "Pure C++",
+}
+
+ARCHITECTURE_COLORS = {
+    "pure_python": "#4C78A8",
+    "hybrid": "#F58518",
+    "pure_cpp": "#54A24B",
+}
+
+ALGORITHM_LABELS = {
+    "original": "Original",
+    "gamma_correction": "Gamma Correction",
+    "histogram_equalization": (
+        "Histogram Equalization"
+    ),
+    "clahe": "CLAHE",
+}
 
 EXPECTED_ARCHITECTURES = (
     "pure_python",
@@ -834,6 +867,478 @@ def write_comparison_summaries(
 
     return COMPARISON_OUTPUT_PATH
 
+MetricRecord = ComparisonSummary | OverallSummary
+
+
+def load_plot_order(
+) -> tuple[list[str], list[str]]:
+    with CONFIG_PATH.open(
+        "r",
+        encoding="utf-8",
+    ) as config_file:
+        config = json.load(config_file)
+
+    algorithms = [
+        str(algorithm["name"])
+        for algorithm in config["algorithms"]
+    ]
+
+    resolutions = [
+        (
+            f"{int(resolution['width'])}"
+            f"x{int(resolution['height'])}"
+        )
+        for resolution in config["resolutions"]
+    ]
+
+    return algorithms, resolutions
+
+
+def save_figure(
+    figure,
+    output_name: str,
+) -> Path:
+    FIGURES_DIRECTORY.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    output_path = (
+        FIGURES_DIRECTORY / output_name
+    )
+
+    figure.savefig(
+        output_path,
+        dpi=300,
+        bbox_inches="tight",
+        metadata={
+            "Software": (
+                "VisionLab benchmark visualization"
+            ),
+        },
+    )
+
+    plt.close(figure)
+
+    return output_path
+
+
+def create_grouped_metric_figure(
+    records: Sequence[MetricRecord],
+    value_getter: Callable[
+        [MetricRecord],
+        float,
+    ],
+    output_name: str,
+    title: str,
+    y_axis_label: str,
+    error_getter: (
+        Callable[
+            [MetricRecord],
+            tuple[float, float],
+        ]
+        | None
+    ) = None,
+) -> Path:
+    algorithms, resolutions = load_plot_order()
+
+    record_by_key = {
+        (
+            record.architecture,
+            record.algorithm,
+            record.resolution,
+        ): record
+        for record in records
+    }
+
+    column_count = min(
+        2,
+        len(algorithms),
+    )
+    row_count = math.ceil(
+        len(algorithms) / column_count
+    )
+
+    figure, axes = plt.subplots(
+        row_count,
+        column_count,
+        figsize=(
+            13,
+            4.5 * row_count,
+        ),
+        squeeze=False,
+    )
+
+    flattened_axes = axes.flatten()
+    bar_width = 0.24
+    base_positions = list(
+        range(len(resolutions))
+    )
+
+    for algorithm_index, algorithm in enumerate(
+        algorithms
+    ):
+        axis = flattened_axes[algorithm_index]
+
+        for architecture_index, architecture in enumerate(
+            EXPECTED_ARCHITECTURES
+        ):
+            horizontal_offset = (
+                architecture_index
+                - (
+                    len(EXPECTED_ARCHITECTURES)
+                    - 1
+                )
+                / 2.0
+            ) * bar_width
+
+            positions = [
+                position + horizontal_offset
+                for position in base_positions
+            ]
+
+            architecture_records = []
+
+            for resolution in resolutions:
+                key = (
+                    architecture,
+                    algorithm,
+                    resolution,
+                )
+
+                if key not in record_by_key:
+                    raise ValueError(
+                        "Missing visualization group: "
+                        f"{key}"
+                    )
+
+                architecture_records.append(
+                    record_by_key[key]
+                )
+
+            values = [
+                value_getter(record)
+                for record in architecture_records
+            ]
+
+            y_errors = None
+
+            if error_getter is not None:
+                errors = [
+                    error_getter(record)
+                    for record in architecture_records
+                ]
+
+                y_errors = [
+                    [
+                        max(0.0, error[0])
+                        for error in errors
+                    ],
+                    [
+                        max(0.0, error[1])
+                        for error in errors
+                    ],
+                ]
+
+            axis.bar(
+                positions,
+                values,
+                width=bar_width,
+                color=(
+                    ARCHITECTURE_COLORS[
+                        architecture
+                    ]
+                ),
+                label=(
+                    ARCHITECTURE_LABELS[
+                        architecture
+                    ]
+                ),
+                yerr=y_errors,
+                capsize=4 if y_errors else 0,
+                edgecolor="black",
+                linewidth=0.4,
+            )
+
+        axis.set_title(
+            ALGORITHM_LABELS.get(
+                algorithm,
+                algorithm.replace(
+                    "_",
+                    " ",
+                ).title(),
+            )
+        )
+        axis.set_xlabel("Resolution")
+        axis.set_ylabel(y_axis_label)
+        axis.set_xticks(base_positions)
+        axis.set_xticklabels(resolutions)
+        axis.set_ylim(bottom=0.0)
+        axis.grid(
+            axis="y",
+            linestyle="--",
+            alpha=0.35,
+        )
+        axis.set_axisbelow(True)
+
+    for unused_index in range(
+        len(algorithms),
+        len(flattened_axes),
+    ):
+        flattened_axes[unused_index].set_visible(
+            False
+        )
+
+    handles, labels = (
+        flattened_axes[0]
+        .get_legend_handles_labels()
+    )
+
+    figure.suptitle(
+        title,
+        fontsize=16,
+        fontweight="bold",
+        y=0.98,
+    )
+
+    figure.legend(
+        handles,
+        labels,
+        loc="upper center",
+        ncol=len(EXPECTED_ARCHITECTURES),
+        bbox_to_anchor=(0.5, 0.94),
+        frameon=False,
+    )
+
+    figure.tight_layout(
+        rect=(0.0, 0.0, 1.0, 0.89)
+    )
+
+    return save_figure(
+        figure,
+        output_name,
+    )
+
+
+def create_resource_bar_figure(
+    resource_summaries: Sequence[
+        ResourceSummary
+    ],
+    value_getter: Callable[
+        [ResourceSummary],
+        float,
+    ],
+    output_name: str,
+    title: str,
+    y_axis_label: str,
+) -> Path:
+    resource_by_architecture = {
+        summary.architecture: summary
+        for summary in resource_summaries
+    }
+
+    values = []
+    labels = []
+    colors = []
+
+    for architecture in EXPECTED_ARCHITECTURES:
+        if architecture not in resource_by_architecture:
+            raise ValueError(
+                "Missing resource summary for: "
+                f"{architecture}"
+            )
+
+        summary = resource_by_architecture[
+            architecture
+        ]
+
+        values.append(
+            value_getter(summary)
+        )
+        labels.append(
+            ARCHITECTURE_LABELS[architecture]
+        )
+        colors.append(
+            ARCHITECTURE_COLORS[architecture]
+        )
+
+    figure, axis = plt.subplots(
+        figsize=(8.5, 5.5)
+    )
+
+    bars = axis.bar(
+        labels,
+        values,
+        color=colors,
+        edgecolor="black",
+        linewidth=0.5,
+    )
+
+    axis.bar_label(
+        bars,
+        labels=[
+            f"{value:.2f}"
+            for value in values
+        ],
+        padding=4,
+    )
+
+    axis.set_title(
+        title,
+        fontsize=14,
+        fontweight="bold",
+    )
+    axis.set_ylabel(y_axis_label)
+    axis.set_ylim(
+        bottom=0.0,
+        top=max(values) * 1.15,
+    )
+    axis.grid(
+        axis="y",
+        linestyle="--",
+        alpha=0.35,
+    )
+    axis.set_axisbelow(True)
+
+    figure.tight_layout()
+
+    return save_figure(
+        figure,
+        output_name,
+    )
+
+
+def generate_visualization_figures(
+    comparisons: list[ComparisonSummary],
+    overall_summaries: list[OverallSummary],
+    resource_summaries: list[ResourceSummary],
+) -> list[Path]:
+    figure_paths = []
+
+    figure_paths.append(
+        create_grouped_metric_figure(
+            records=comparisons,
+            value_getter=lambda record: (
+                record.mean_processing_time_ms
+            ),
+            error_getter=lambda record: (
+                (
+                    record.mean_processing_time_ms
+                    - record.confidence_interval_95_lower_ms
+                ),
+                (
+                    record.confidence_interval_95_upper_ms
+                    - record.mean_processing_time_ms
+                ),
+            ),
+            output_name=(
+                "mean_processing_time_ms.png"
+            ),
+            title=(
+                "Mean Processing Time by Architecture"
+            ),
+            y_axis_label=(
+                "Processing Time (ms)"
+            ),
+        )
+    )
+
+    figure_paths.append(
+        create_grouped_metric_figure(
+            records=comparisons,
+            value_getter=lambda record: (
+                record.effective_fps
+            ),
+            output_name="effective_fps.png",
+            title=(
+                "Effective FPS by Architecture"
+            ),
+            y_axis_label="Effective FPS",
+        )
+    )
+
+    figure_paths.append(
+        create_grouped_metric_figure(
+            records=overall_summaries,
+            value_getter=lambda record: (
+                record.p95_ms
+            ),
+            output_name=(
+                "p95_processing_time_ms.png"
+            ),
+            title=(
+                "P95 Processing Time by Architecture"
+            ),
+            y_axis_label=(
+                "P95 Processing Time (ms)"
+            ),
+        )
+    )
+
+    figure_paths.append(
+        create_grouped_metric_figure(
+            records=comparisons,
+            value_getter=lambda record: (
+                record.speedup_vs_pure_python
+            ),
+            output_name=(
+                "speedup_vs_pure_python.png"
+            ),
+            title=(
+                "Speedup Relative to Pure Python"
+            ),
+            y_axis_label="Speedup (×)",
+        )
+    )
+
+    figure_paths.append(
+        create_resource_bar_figure(
+            resource_summaries=resource_summaries,
+            value_getter=lambda summary: (
+                summary.average_cpu_percent
+            ),
+            output_name=(
+                "average_cpu_percent.png"
+            ),
+            title=(
+                "Average CPU Utilization"
+            ),
+            y_axis_label="Average CPU (%)",
+        )
+    )
+
+    figure_paths.append(
+        create_resource_bar_figure(
+            resource_summaries=resource_summaries,
+            value_getter=lambda summary: (
+                summary.peak_rss_mib
+            ),
+            output_name="peak_rss_mib.png",
+            title=(
+                "Peak Resident Memory Usage"
+            ),
+            y_axis_label="Peak RSS (MiB)",
+        )
+    )
+
+    figure_paths.append(
+        create_resource_bar_figure(
+            resource_summaries=resource_summaries,
+            value_getter=lambda summary: (
+                summary.wall_time_seconds
+            ),
+            output_name=(
+                "wall_time_seconds.png"
+            ),
+            title=(
+                "Total Benchmark Wall-Clock Time"
+            ),
+            y_axis_label="Wall Time (seconds)",
+        )
+    )
+
+    return figure_paths
+
 def main() -> None:
     trial_summaries = load_trial_summaries()
     overall_summaries = load_overall_summaries()
@@ -854,6 +1359,12 @@ def main() -> None:
         )
     )
 
+    figure_paths = generate_visualization_figures(
+        comparisons,
+        overall_summaries,
+        resource_summaries,
+    )
+
     print("Visualization inputs validated.")
     print(
         f"Trial summaries: {len(trial_summaries)}"
@@ -868,6 +1379,11 @@ def main() -> None:
         "Comparison summary created: "
         f"{comparison_output_path}"
     )
+
+    print("Visualization figures created:")
+
+    for figure_path in figure_paths:
+        print(f"  {figure_path}")
 
 if __name__ == "__main__":
     main()

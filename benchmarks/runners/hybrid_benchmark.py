@@ -66,6 +66,40 @@ def find_module_directory() -> Path:
                 f"{module_directory}"
             )
 
+        module_candidates = []
+
+        for pattern in (
+            "visionlab_cpp*.pyd",
+            "visionlab_cpp*.so",
+        ):
+            module_candidates.extend(
+                candidate
+                for candidate in module_directory.glob(
+                    pattern
+                )
+                if candidate.is_file()
+            )
+
+        if not module_candidates:
+            raise FileNotFoundError(
+                "Belirtilen dizinde visionlab_cpp "
+                "modülü bulunamadı: "
+                f"{module_directory}"
+            )
+
+        if not any(
+            is_release_candidate(
+                candidate,
+                module_directory,
+            )
+            for candidate in module_candidates
+        ):
+            raise RuntimeError(
+                "VISIONLAB_CPP_MODULE_DIR içindeki "
+                "visionlab_cpp modülü Release build değil: "
+                f"{module_directory}"
+            )
+
         return module_directory
 
     build_directory = HYBRID_PROJECT_DIR / "build"

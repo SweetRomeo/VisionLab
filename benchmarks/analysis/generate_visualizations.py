@@ -578,6 +578,41 @@ def validate_experiment_coverage(
         for summary in overall_summaries
     }
 
+    expected_architecture_groups = {
+        (
+            architecture,
+            algorithm,
+            resolution,
+        )
+        for architecture in EXPECTED_ARCHITECTURES
+        for algorithm, resolution in expected_groups
+    }
+
+    observed_trial_groups = set(trials_by_group)
+    observed_overall_groups = set(overall_by_group)
+
+    if (
+        observed_trial_groups
+        != expected_architecture_groups
+    ):
+        raise ValueError(
+            "Trial summary group coverage mismatch. "
+            f"Expected "
+            f"{sorted(expected_architecture_groups)}, "
+            f"found {sorted(observed_trial_groups)}."
+        )
+
+    if (
+        observed_overall_groups
+        != expected_architecture_groups
+    ):
+        raise ValueError(
+            "Overall summary group coverage mismatch. "
+            f"Expected "
+            f"{sorted(expected_architecture_groups)}, "
+            f"found {sorted(observed_overall_groups)}."
+        )
+
     for architecture in EXPECTED_ARCHITECTURES:
         for algorithm, resolution in expected_groups:
             group_key = (

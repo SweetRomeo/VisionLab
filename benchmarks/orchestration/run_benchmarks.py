@@ -1,12 +1,13 @@
+import csv
 import os
 import subprocess
-import csv
+import sys
 import time
-import psutil
-
-from statistics import fmean
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import fmean
+
+import psutil
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -15,18 +16,18 @@ PURE_PYTHON_DIRECTORY = PROJECT_ROOT / "pure-python"
 HYBRID_DIRECTORY = PROJECT_ROOT / "hybrid-python-cpp"
 CPP_DIRECTORY = PROJECT_ROOT / "cpp-opencv-core"
 
-PURE_PYTHON_RUNNER = (
-    PROJECT_ROOT
-    / "benchmarks"
-    / "runners"
-    / "pure_python_benchmark.py"
-)
-
 HYBRID_RUNNER = (
     PROJECT_ROOT
     / "benchmarks"
     / "runners"
     / "hybrid_benchmark.py"
+)
+
+ANALYSIS_SCRIPT = (
+    PROJECT_ROOT
+    / "benchmarks"
+    / "analysis"
+    / "analyze_results.py"
 )
 
 RESULTS_DIRECTORY = (
@@ -38,6 +39,13 @@ RESULTS_DIRECTORY = (
 RESOURCE_OUTPUT_PATH = (
     RESULTS_DIRECTORY
     / "benchmark_resource_summary.csv"
+)
+
+ANALYSIS_SCRIPT = (
+    PROJECT_ROOT
+    / "benchmarks"
+    / "analysis"
+    / "analyze_results.py"
 )
 
 SAMPLING_INTERVAL_SECONDS = 0.1
@@ -513,6 +521,26 @@ def write_resource_summary(
 
     return RESOURCE_OUTPUT_PATH
 
+def run_result_analysis() -> None:
+    if not ANALYSIS_SCRIPT.is_file():
+        raise FileNotFoundError(
+            f"Result analyzer was not found: "
+            f"{ANALYSIS_SCRIPT}"
+        )
+
+    print("\nValidating benchmark results...")
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALYSIS_SCRIPT),
+        ],
+        cwd=PROJECT_ROOT,
+        check=True,
+    )
+
+    print("Benchmark result validation passed.")
+
 def main() -> None:
     commands = create_benchmark_commands()
     measurements = []
@@ -530,6 +558,8 @@ def main() -> None:
             )
 
         measurements.append(measurement)
+
+    run_result_analysis()
 
     output_path = write_resource_summary(
         measurements

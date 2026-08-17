@@ -578,6 +578,7 @@ hybrid_results.csv
 pure_cpp_results.csv
 benchmark_trial_summary.csv
 benchmark_summary.csv
+benchmark_resource_summary.csv
 environment_metadata.json
 ```
 

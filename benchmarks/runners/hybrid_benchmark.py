@@ -69,8 +69,8 @@ def find_module_directory() -> Path:
         module_candidates = []
 
         for pattern in (
-                "visionlab_cpp*.pyd",
-                "visionlab_cpp*.so",
+            "visionlab_cpp*.pyd",
+            "visionlab_cpp*.so",
         ):
             module_candidates.extend(
                 candidate
@@ -88,11 +88,11 @@ def find_module_directory() -> Path:
             )
 
         if not any(
-                is_release_candidate(
-                    candidate,
-                    module_directory,
-                )
-                for candidate in module_candidates
+            is_release_candidate(
+                candidate,
+                module_directory,
+            )
+            for candidate in module_candidates
         ):
             raise RuntimeError(
                 "VISIONLAB_CPP_MODULE_DIR içindeki "

@@ -16,6 +16,13 @@ PURE_PYTHON_DIRECTORY = PROJECT_ROOT / "pure-python"
 HYBRID_DIRECTORY = PROJECT_ROOT / "hybrid-python-cpp"
 CPP_DIRECTORY = PROJECT_ROOT / "cpp-opencv-core"
 
+PURE_PYTHON_RUNNER = (
+    PROJECT_ROOT
+    / "benchmarks"
+    / "runners"
+    / "pure_python_benchmark.py"
+)
+
 HYBRID_RUNNER = (
     PROJECT_ROOT
     / "benchmarks"
@@ -39,13 +46,6 @@ RESULTS_DIRECTORY = (
 RESOURCE_OUTPUT_PATH = (
     RESULTS_DIRECTORY
     / "benchmark_resource_summary.csv"
-)
-
-ANALYSIS_SCRIPT = (
-    PROJECT_ROOT
-    / "benchmarks"
-    / "analysis"
-    / "analyze_results.py"
 )
 
 SAMPLING_INTERVAL_SECONDS = 0.1

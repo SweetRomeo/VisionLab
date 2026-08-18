@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "frame_indices": [1, 100, 250, 500],
+  "output_directory": "benchmarks/results/output_equivalence"
+}

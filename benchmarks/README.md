@@ -124,88 +124,177 @@ cmake \
 
 The benchmark executable must not be run from a Debug build. Debug execution is intentionally rejected by the application.
 
-## 5. Validate output equivalence
+## 5. Validate cross-architecture output equivalence
 
-Output equivalence must be validated before running the official performance benchmarks.
+Output equivalence must be validated before comparing the performance of the three architectures:
 
-The validation script compares the Pure Python implementation against the shared C++ `ImageProcess` core used by both the Hybrid and Pure C++ implementations.
+* Pure Python
+* Hybrid Python+C++
+* Pure C++
 
-It tests:
-
-* Five deterministic frames distributed across the benchmark video
-* Every algorithm defined in `benchmark_config.json`
-* Every configured resolution
-* Output shape and data type
-* Mean absolute error
-* Maximum absolute error
-* PSNR
-* Exact pixel equality
-
-The default validation requires exact pixel-level equality:
+The validation uses deterministic frames selected by:
 
 ```text
-mean absolute error = 0
-maximum absolute error = 0
+benchmarks/config/output_validation_config.json
 ```
 
-The validation script also verifies that the active environment
-and `pure-python/.venv` use identical Python, NumPy, and OpenCV
-versions before running comparisons.
+The same input frames, resolutions, algorithms and parameters are supplied to all three implementations.
 
-### Linux and macOS
+### 5.1. Install validation dependencies
+
+Activate the Hybrid virtual environment and install the validation requirements.
+
+Linux and macOS:
 
 ```bash
 source hybrid-python-cpp/.venv/bin/activate
-
-python benchmarks/validation/validate_output_equivalence.py
-
-deactivate
+python -m pip install -r benchmarks/validation/requirements.txt
 ```
 
-### Windows PowerShell
+Windows PowerShell:
 
 ```powershell
 .\hybrid-python-cpp\.venv\Scripts\Activate.ps1
-
-python benchmarks\validation\validate_output_equivalence.py
-
-deactivate
+python -m pip install -r benchmarks\validation\requirements.txt
 ```
 
-### Windows Git Bash
+Windows Git Bash:
 
 ```bash
 source hybrid-python-cpp/.venv/Scripts/activate
+python -m pip install -r benchmarks/validation/requirements.txt
+```
 
+### 5.2. Build the validation targets
+
+Build the Hybrid module and the Pure C++ validation executable in Release mode.
+
+Hybrid module:
+
+```bash
+cmake \
+    --build hybrid-python-cpp/build \
+    --config Release
+```
+
+Pure C++ validation executable:
+
+```bash
+cmake \
+    --build cpp-opencv-core/build \
+    --config Release \
+    --target VisionLabCppValidation
+```
+
+The validation script automatically searches the build directories for:
+
+```text
+visionlab_cpp
+VisionLabCppValidation
+```
+
+If automatic discovery fails, set the following environment variables to the corresponding Release build locations:
+
+```text
+VISIONLAB_CPP_MODULE_DIR
+VISIONLAB_CPP_VALIDATION_EXE
+```
+
+Example for Windows PowerShell:
+
+```powershell
+$env:VISIONLAB_CPP_MODULE_DIR="C:\path\to\VisionLab\hybrid-python-cpp\build\YOUR_RELEASE_DIRECTORY"
+$env:VISIONLAB_CPP_VALIDATION_EXE="C:\path\to\VisionLab\cpp-opencv-core\build\YOUR_RELEASE_DIRECTORY\VisionLabCppValidation.exe"
+```
+
+Example for Windows Git Bash:
+
+```bash
+export VISIONLAB_CPP_MODULE_DIR="C:/path/to/VisionLab/hybrid-python-cpp/build/YOUR_RELEASE_DIRECTORY"
+export VISIONLAB_CPP_VALIDATION_EXE="C:/path/to/VisionLab/cpp-opencv-core/build/YOUR_RELEASE_DIRECTORY/VisionLabCppValidation.exe"
+```
+
+### 5.3. Run the validation
+
+Run the following command from the repository root while the Hybrid virtual environment is active:
+
+```bash
 python benchmarks/validation/validate_output_equivalence.py
-
-deactivate
 ```
 
-If the compiled C++ module is not discovered automatically, set `VISIONLAB_CPP_MODULE_DIR` to the directory containing `visionlab_cpp` before running the validation.
-
-A successful default validation finishes with:
+The default validation configuration evaluates:
 
 ```text
-Output equivalence passed for 60 comparison(s).
+4 deterministic frames
+× 3 resolutions
+× 4 algorithms
+× 3 architecture pairs
+= 144 comparisons
 ```
 
-The number of comparisons is calculated as:
+The architecture pairs are:
 
 ```text
-5 frames × 3 resolutions × 4 algorithms
-= 60 comparisons
+Pure Python vs Hybrid Python+C++
+Pure Python vs Pure C++
+Hybrid Python+C++ vs Pure C++
 ```
 
-Detailed results are written to:
+For each comparison, the validator checks:
+
+* Output dimensions
+* Channel count
+* NumPy data type
+* Mean absolute error
+* Maximum absolute error
+* Mean squared error
+* Peak signal-to-noise ratio (PSNR)
+* Structural similarity index (SSIM)
+
+The configurable tolerance values are stored in:
 
 ```text
-benchmarks/results/output_equivalence_results.csv
+benchmarks/config/output_validation_config.json
 ```
 
-This generated CSV is ignored by Git and should not be committed.
+The Original algorithm must produce an exact pixel match. Hybrid Python+C++ and Pure C++ must also match exactly because they use the same C++ image-processing core.
 
-Do not increase the error tolerances unless the numerical differences have been investigated and scientifically justified.
+Small platform-dependent numerical differences between Pure Python and the C++ implementations may be accepted only when all configured MAE, maximum-difference, PSNR and SSIM thresholds are satisfied.
+
+A successful run finishes with:
+
+```text
+Equivalence comparisons: 144
+Failed comparisons: 0
+Output equivalence validation passed.
+```
+
+If any comparison violates the configured rules, the report is still written and the validator terminates with a non-zero exit code.
+
+### 5.4. Validation outputs
+
+Generated validation artifacts are written under:
+
+```text
+benchmarks/results/output_equivalence/
+```
+
+The consolidated machine-readable report is:
+
+```text
+benchmarks/results/output_equivalence/output_equivalence_report.csv
+```
+
+Additional pair-specific reports are:
+
+```text
+benchmarks/results/output_equivalence/python_hybrid_comparison.csv
+benchmarks/results/output_equivalence/python_cpp_comparison.csv
+```
+
+The consolidated report contains 144 data rows and records the calculated metrics, exact-match requirement, pass/fail status and failure reason for every comparison.
+
+Generated input images, processed images and CSV reports are ignored by Git and must not be committed.
 
 ## 6. Collect environment metadata
 

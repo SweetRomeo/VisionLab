@@ -57,12 +57,35 @@ add_executable(
     src/imageprocess.cpp
 )
 
+add_executable(
+    VisionLabCppValidation
+
+    ../benchmarks/validation/pure_cpp_output_generator.cpp
+    src/imageprocess.h
+    src/imageprocess.cpp
+)
+
 target_include_directories(
     VisionLabCppBenchmark
     PRIVATE
 
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${OpenCV_INCLUDE_DIRS}
+)
+
+target_include_directories(
+    VisionLabCppValidation
+    PRIVATE
+
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_link_libraries(
+    VisionLabCppValidation
+    PRIVATE
+
+    ${OpenCV_LIBS}
 )
 
 target_link_libraries(
@@ -121,6 +144,19 @@ if(WIN32)
 
             COMMENT
                 "Copying OpenCV runtime DLL files for benchmark"
+        )
+	add_custom_command(
+            TARGET VisionLabCppValidation
+            POST_BUILD
+
+            COMMAND
+                ${CMAKE_COMMAND}
+                -E copy_if_different
+                ${OPENCV_RUNTIME_DLLS}
+                $<TARGET_FILE_DIR:VisionLabCppValidation>
+
+            COMMENT
+                "Copying OpenCV runtime DLL files for validation"
         )
     else()
         message(

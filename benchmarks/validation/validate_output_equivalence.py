@@ -40,6 +40,92 @@ HYBRID_PROJECT_DIRECTORY = (
 
 DLL_DIRECTORY_HANDLES = []
 
+def get_pure_python_interpreter_path() -> Path:
+    interpreter_path = (
+        PURE_PYTHON_DIRECTORY / ".venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else PURE_PYTHON_DIRECTORY / ".venv" / "bin" / "python"
+    )
+
+    if not interpreter_path.is_file():
+        raise FileNotFoundError(
+            "Pure Python virtual environment interpreter was "
+            "not found. Expected: "
+            f"{interpreter_path}"
+        )
+
+    return interpreter_path
+
+def read_runtime_dependency_versions(
+    python_executable: Path,
+) -> dict[str, str]:
+    command = [
+        str(python_executable),
+        "-c",
+        (
+            "import cv2, json, numpy as np, sys; "
+            "print(json.dumps({"
+            "'python': sys.version.split()[0], "
+            "'numpy': np.__version__, "
+            "'opencv': cv2.__version__"
+            "}))"
+        ),
+    ]
+    try:
+        process = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        stderr_output = (error.stderr or "").strip()
+        raise RuntimeError(
+            "Could not read runtime dependencies from "
+            f"{python_executable}: {stderr_output or error}"
+        ) from error
+
+    try:
+        return json.loads(process.stdout)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "Could not parse runtime dependencies from "
+            f"{python_executable}: {process.stdout.strip()}"
+        ) from error
+
+def validate_runtime_dependencies_match() -> None:
+    current_versions = {
+        "python": sys.version.split()[0],
+        "numpy": np.__version__,
+        "opencv": cv2.__version__,
+    }
+    pure_python_versions = read_runtime_dependency_versions(
+        get_pure_python_interpreter_path()
+    )
+    mismatches = [
+        dependency_name
+        for dependency_name in current_versions
+        if current_versions[dependency_name]
+        != pure_python_versions.get(dependency_name)
+    ]
+
+    if mismatches:
+        mismatch_message = ", ".join(
+            (
+                f"{dependency_name} "
+                f"(hybrid={current_versions[dependency_name]}, "
+                "pure_python="
+                f"{pure_python_versions.get(dependency_name)})"
+            )
+            for dependency_name in mismatches
+        )
+        raise RuntimeError(
+            "Output equivalence validation requires matching "
+            "runtime dependencies between the active environment "
+            "and pure-python/.venv. Mismatches: "
+            f"{mismatch_message}"
+        )
+
 def find_cpp_validation_executable() -> Path:
     configured_executable = os.getenv(
         "VISIONLAB_CPP_VALIDATION_EXE"
@@ -83,7 +169,10 @@ def find_cpp_validation_executable() -> Path:
     release_candidates = [
         candidate
         for candidate in candidates
-        if "release" in str(candidate.parent).lower()
+        if is_release_candidate(
+            candidate,
+            build_directory,
+        )
     ]
 
     if not release_candidates:
@@ -99,6 +188,32 @@ def find_cpp_validation_executable() -> Path:
         release_candidates,
         key=lambda path: path.stat().st_mtime,
     )
+
+def is_release_candidate(
+    candidate: Path,
+    build_directory: Path,
+) -> bool:
+    if "release" in str(candidate.parent).lower():
+        return True
+
+    cache_path = build_directory / "CMakeCache.txt"
+
+    if not cache_path.is_file():
+        return False
+
+    with cache_path.open(
+        "r",
+        encoding="utf-8",
+    ) as cache_file:
+        for line in cache_file:
+            if line.startswith("CMAKE_BUILD_TYPE:STRING="):
+                build_type = line.removeprefix(
+                    "CMAKE_BUILD_TYPE:STRING="
+                ).strip()
+
+                return build_type.lower() == "release"
+
+    return False
 
 def find_hybrid_module_directory() -> Path:
     configured_directory = os.getenv(
@@ -136,7 +251,10 @@ def find_hybrid_module_directory() -> Path:
     release_candidates = [
         candidate
         for candidate in candidates
-        if "release" in str(candidate.parent).lower()
+        if is_release_candidate(
+            candidate,
+            build_directory,
+        )
     ]
 
     if not release_candidates:
@@ -963,24 +1081,39 @@ def load_validation_rules(
             "Exact-match rules are missing."
         )
 
-    thresholds = {
-        "maximum_mean_absolute_error": float(
-            thresholds_config[
-                "maximum_mean_absolute_error"
-            ]
-        ),
-        "maximum_absolute_error": float(
-            thresholds_config[
-                "maximum_absolute_error"
-            ]
-        ),
-        "minimum_psnr_db": float(
-            thresholds_config["minimum_psnr_db"]
-        ),
-        "minimum_ssim": float(
-            thresholds_config["minimum_ssim"]
-        ),
-    }
+    threshold_names = (
+        "maximum_mean_absolute_error",
+        "maximum_absolute_error",
+        "minimum_psnr_db",
+        "minimum_ssim",
+    )
+
+    thresholds = {}
+
+    for threshold_name in threshold_names:
+        threshold_value = thresholds_config.get(
+            threshold_name
+        )
+
+        if (
+            isinstance(threshold_value, bool)
+            or not isinstance(
+                threshold_value,
+                (int, float),
+            )
+            or not math.isfinite(
+                float(threshold_value)
+            )
+        ):
+            raise ValueError(
+                "Validation threshold must be "
+                "a finite number: "
+                f"{threshold_name}"
+            )
+
+        thresholds[threshold_name] = float(
+            threshold_value
+        )
 
     if (
         thresholds[
@@ -1000,16 +1133,25 @@ def load_validation_rules(
             "Validation thresholds are invalid."
         )
 
-    exact_match_rules = {
-        "original": bool(
-            exact_match_config["original"]
-        ),
-        "hybrid_vs_pure_cpp": bool(
-            exact_match_config[
-                "hybrid_vs_pure_cpp"
-            ]
-        ),
-    }
+    exact_rule_names = (
+        "original",
+        "hybrid_vs_pure_cpp",
+    )
+
+    exact_match_rules = {}
+
+    for rule_name in exact_rule_names:
+        rule_value = exact_match_config.get(
+            rule_name
+        )
+
+        if not isinstance(rule_value, bool):
+            raise ValueError(
+                "Exact-match rule must be "
+                f"a boolean: {rule_name}"
+            )
+
+        exact_match_rules[rule_name] = rule_value
 
     return thresholds, exact_match_rules
 
@@ -1328,6 +1470,8 @@ def main() -> None:
     validation_config = load_json(
         VALIDATION_CONFIG_PATH
     )
+
+    validate_runtime_dependencies_match()
 
     frame_indices = validate_frame_indices(
         validation_config

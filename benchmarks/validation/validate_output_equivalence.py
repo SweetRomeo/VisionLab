@@ -11,6 +11,8 @@ import csv
 import math
 import subprocess
 
+from skimage.metrics import structural_similarity
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -401,6 +403,15 @@ def calculate_image_metrics(
         )
     )
 
+    ssim_value = float(
+        structural_similarity(
+            reference,
+            candidate,
+            channel_axis=2,
+            data_range=255,
+        )
+    )
+
     return {
         "mean_absolute_error": (
             mean_absolute_error
@@ -411,7 +422,10 @@ def calculate_image_metrics(
         "mean_squared_error": (
             mean_squared_error
         ),
-        "psnr_db": psnr_db,
+        "psnr_db": (
+            psnr_db
+        ),
+        "ssim" : ssim_value,
     }
 
 
@@ -480,6 +494,7 @@ def compare_python_and_hybrid(
         "maximum_absolute_error",
         "mean_squared_error",
         "psnr_db",
+        "ssim",
     ]
 
     with comparison_path.open(
@@ -817,6 +832,7 @@ def compare_python_and_cpp(
         "maximum_absolute_error",
         "mean_squared_error",
         "psnr_db",
+        "ssim",
     ]
 
     with comparison_path.open(
@@ -927,6 +943,384 @@ def compare_python_and_cpp(
 
     return comparison_path
 
+def load_validation_rules(
+    validation_config: dict[str, Any],
+) -> tuple[dict[str, float], dict[str, bool]]:
+    thresholds_config = validation_config.get(
+        "thresholds"
+    )
+    exact_match_config = validation_config.get(
+        "exact_match_rules"
+    )
+
+    if not isinstance(thresholds_config, dict):
+        raise ValueError(
+            "Validation thresholds are missing."
+        )
+
+    if not isinstance(exact_match_config, dict):
+        raise ValueError(
+            "Exact-match rules are missing."
+        )
+
+    thresholds = {
+        "maximum_mean_absolute_error": float(
+            thresholds_config[
+                "maximum_mean_absolute_error"
+            ]
+        ),
+        "maximum_absolute_error": float(
+            thresholds_config[
+                "maximum_absolute_error"
+            ]
+        ),
+        "minimum_psnr_db": float(
+            thresholds_config["minimum_psnr_db"]
+        ),
+        "minimum_ssim": float(
+            thresholds_config["minimum_ssim"]
+        ),
+    }
+
+    if (
+        thresholds[
+            "maximum_mean_absolute_error"
+        ] < 0.0
+        or thresholds[
+            "maximum_absolute_error"
+        ] < 0.0
+        or thresholds["minimum_psnr_db"] < 0.0
+        or not (
+            0.0
+            <= thresholds["minimum_ssim"]
+            <= 1.0
+        )
+    ):
+        raise ValueError(
+            "Validation thresholds are invalid."
+        )
+
+    exact_match_rules = {
+        "original": bool(
+            exact_match_config["original"]
+        ),
+        "hybrid_vs_pure_cpp": bool(
+            exact_match_config[
+                "hybrid_vs_pure_cpp"
+            ]
+        ),
+    }
+
+    return thresholds, exact_match_rules
+
+
+def evaluate_metrics(
+    metrics: dict[str, float],
+    reference_architecture: str,
+    candidate_architecture: str,
+    algorithm_name: str,
+    thresholds: dict[str, float],
+    exact_match_rules: dict[str, bool],
+) -> tuple[bool, list[str]]:
+    architecture_pair = {
+        reference_architecture,
+        candidate_architecture,
+    }
+
+    exact_match_required = (
+        (
+            algorithm_name == "original"
+            and exact_match_rules["original"]
+        )
+        or (
+            architecture_pair
+            == {"hybrid", "pure_cpp"}
+            and exact_match_rules[
+                "hybrid_vs_pure_cpp"
+            ]
+        )
+    )
+
+    failure_reasons = []
+
+    if exact_match_required:
+        if metrics["maximum_absolute_error"] != 0:
+            failure_reasons.append(
+                "exact pixel match required"
+            )
+
+        return (
+            exact_match_required,
+            failure_reasons,
+        )
+
+    if (
+        metrics["mean_absolute_error"]
+        > thresholds[
+            "maximum_mean_absolute_error"
+        ]
+    ):
+        failure_reasons.append(
+            "mean absolute error exceeded"
+        )
+
+    if (
+        metrics["maximum_absolute_error"]
+        > thresholds["maximum_absolute_error"]
+    ):
+        failure_reasons.append(
+            "maximum absolute error exceeded"
+        )
+
+    if (
+        metrics["psnr_db"]
+        < thresholds["minimum_psnr_db"]
+    ):
+        failure_reasons.append(
+            "PSNR below minimum"
+        )
+
+    if (
+        metrics["ssim"]
+        < thresholds["minimum_ssim"]
+    ):
+        failure_reasons.append(
+            "SSIM below minimum"
+        )
+
+    return exact_match_required, failure_reasons
+
+
+def write_equivalence_report(
+    frames: dict[int, np.ndarray],
+    resolutions: list[dict[str, Any]],
+    algorithms: list[dict[str, Any]],
+    output_directory: Path,
+    thresholds: dict[str, float],
+    exact_match_rules: dict[str, bool],
+) -> tuple[Path, int, int]:
+    architecture_pairs = [
+        ("pure_python", "hybrid"),
+        ("pure_python", "pure_cpp"),
+        ("hybrid", "pure_cpp"),
+    ]
+
+    report_path = (
+        output_directory
+        / "output_equivalence_report.csv"
+    )
+
+    fieldnames = [
+        "reference_architecture",
+        "candidate_architecture",
+        "algorithm",
+        "resolution",
+        "frame_index",
+        "shape_match",
+        "dtype_match",
+        "mean_absolute_error",
+        "maximum_absolute_error",
+        "mean_squared_error",
+        "psnr_db",
+        "ssim",
+        "exact_match_required",
+        "passed",
+        "failure_reasons",
+    ]
+
+    comparison_count = 0
+    failure_count = 0
+
+    with report_path.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as output_file:
+        writer = csv.DictWriter(
+            output_file,
+            fieldnames=fieldnames,
+        )
+        writer.writeheader()
+
+        for resolution in resolutions:
+            width = int(resolution["width"])
+            height = int(resolution["height"])
+            resolution_name = f"{width}x{height}"
+
+            for algorithm_config in algorithms:
+                algorithm_name = (
+                    algorithm_config["name"]
+                )
+
+                for frame_index in frames:
+                    file_name = (
+                        f"frame_{frame_index:06d}.png"
+                    )
+
+                    for (
+                        reference_architecture,
+                        candidate_architecture,
+                    ) in architecture_pairs:
+                        reference_path = (
+                            output_directory
+                            / "outputs"
+                            / reference_architecture
+                            / algorithm_name
+                            / resolution_name
+                            / file_name
+                        )
+
+                        candidate_path = (
+                            output_directory
+                            / "outputs"
+                            / candidate_architecture
+                            / algorithm_name
+                            / resolution_name
+                            / file_name
+                        )
+
+                        reference = cv2.imread(
+                            str(reference_path),
+                            cv2.IMREAD_COLOR,
+                        )
+                        candidate = cv2.imread(
+                            str(candidate_path),
+                            cv2.IMREAD_COLOR,
+                        )
+
+                        if (
+                            reference is None
+                            or candidate is None
+                        ):
+                            raise RuntimeError(
+                                "A validation image "
+                                "could not be read."
+                            )
+
+                        shape_match = (
+                            reference.shape
+                            == candidate.shape
+                        )
+                        dtype_match = (
+                            reference.dtype
+                            == candidate.dtype
+                        )
+
+                        failure_reasons = []
+
+                        if not shape_match:
+                            failure_reasons.append(
+                                "shape mismatch"
+                            )
+
+                        if not dtype_match:
+                            failure_reasons.append(
+                                "dtype mismatch"
+                            )
+
+                        metrics = {
+                            "mean_absolute_error": (
+                                float("nan")
+                            ),
+                            "maximum_absolute_error": (
+                                float("nan")
+                            ),
+                            "mean_squared_error": (
+                                float("nan")
+                            ),
+                            "psnr_db": float("nan"),
+                            "ssim": float("nan"),
+                        }
+
+                        exact_match_required = False
+
+                        if shape_match and dtype_match:
+                            metrics = (
+                                calculate_image_metrics(
+                                    reference,
+                                    candidate,
+                                )
+                            )
+
+                            (
+                                exact_match_required,
+                                metric_failures,
+                            ) = evaluate_metrics(
+                                metrics=metrics,
+                                reference_architecture=(
+                                    reference_architecture
+                                ),
+                                candidate_architecture=(
+                                    candidate_architecture
+                                ),
+                                algorithm_name=(
+                                    algorithm_name
+                                ),
+                                thresholds=thresholds,
+                                exact_match_rules=(
+                                    exact_match_rules
+                                ),
+                            )
+
+                            failure_reasons.extend(
+                                metric_failures
+                            )
+
+                        passed = not failure_reasons
+
+                        comparison_count += 1
+
+                        if not passed:
+                            failure_count += 1
+
+                        writer.writerow(
+                            {
+                                "reference_architecture": (
+                                    reference_architecture
+                                ),
+                                "candidate_architecture": (
+                                    candidate_architecture
+                                ),
+                                "algorithm": (
+                                    algorithm_name
+                                ),
+                                "resolution": (
+                                    resolution_name
+                                ),
+                                "frame_index": (
+                                    frame_index
+                                ),
+                                "shape_match": (
+                                    str(shape_match).lower()
+                                ),
+                                "dtype_match": (
+                                    str(dtype_match).lower()
+                                ),
+                                **{
+                                    name: f"{value:.6f}"
+                                    for name, value
+                                    in metrics.items()
+                                },
+                                "exact_match_required": (
+                                    str(
+                                        exact_match_required
+                                    ).lower()
+                                ),
+                                "passed": (
+                                    str(passed).lower()
+                                ),
+                                "failure_reasons": "; ".join(
+                                    failure_reasons
+                                ),
+                            }
+                        )
+
+    return (
+        report_path,
+        comparison_count,
+        failure_count,
+    )
+
 def main() -> None:
     benchmark_config = load_json(
         BENCHMARK_CONFIG_PATH
@@ -1004,6 +1398,25 @@ def main() -> None:
         )
     )
 
+    thresholds, exact_match_rules = (
+        load_validation_rules(
+            validation_config
+        )
+    )
+
+    (
+        equivalence_report_path,
+        equivalence_comparison_count,
+        equivalence_failure_count,
+    ) = write_equivalence_report(
+        frames=selected_frames,
+        resolutions=resolutions,
+        algorithms=benchmark_config["algorithms"],
+        output_directory=output_directory,
+        thresholds=thresholds,
+        exact_match_rules=exact_match_rules,
+    )
+
     print(
         f"Selected deterministic frames: "
         f"{len(selected_frames)}"
@@ -1029,6 +1442,28 @@ def main() -> None:
     print(
         f"Python-C++ comparison report: "
         f"{cpp_comparison_path}"
+    )
+
+    print(
+        f"Equivalence comparisons: "
+        f"{equivalence_comparison_count}"
+    )
+    print(
+        f"Failed comparisons: "
+        f"{equivalence_failure_count}"
+    )
+    print(
+        f"Equivalence report: "
+        f"{equivalence_report_path}"
+    )
+
+    if equivalence_failure_count:
+        raise RuntimeError(
+            "Output equivalence validation failed."
+        )
+
+    print(
+        "Output equivalence validation passed."
     )
 
 if __name__ == "__main__":

@@ -664,8 +664,95 @@ After the analyzer and resource-monitored benchmark run complete successfully, g
 ```bash
 python benchmarks/analysis/generate_visualizations.py
 ```
+## 11. Run the real-time pipeline evaluation
 
-## 11. Expected output files
+The real-time experiment replays the benchmark video at a fixed target frame rate and evaluates whether each architecture can process frames before their deadlines.
+
+The shared configuration is located at:
+
+```text
+benchmarks/config/realtime_config.json
+```
+
+The default configuration uses:
+
+* 30 FPS target frame rate
+* 33.333 ms frame deadline
+* 30 warm-up frames
+* 500 measured frames per trial
+* 5 trials
+* A capacity-one latest-frame queue
+* Latest-frame replacement when the consumer falls behind
+
+Run the implementations separately. Do not run multiple architectures simultaneously.
+
+### 11.1. Pure Python
+
+Activate the Pure Python environment and run:
+
+```bash
+python benchmarks/realtime/pure_python_realtime.py
+```
+
+### 11.2. Hybrid Python+C++
+
+Activate the Hybrid environment, configure `VISIONLAB_CPP_MODULE_DIR` when necessary, and run:
+
+```bash
+python benchmarks/realtime/hybrid_realtime.py
+```
+
+### 11.3. Pure C++
+
+Build and run `VisionLabCppRealtime` in Release mode:
+
+```bash
+cmake \
+    --build cpp-opencv-core/build \
+    --config Release \
+    --target VisionLabCppRealtime
+
+./cpp-opencv-core/build/Release/VisionLabCppRealtime
+```
+
+On Windows with a Qt Creator kit-specific directory:
+
+```powershell
+.\cpp-opencv-core\build\YOUR_RELEASE_DIRECTORY\VisionLabCppRealtime.exe
+```
+
+Each runner writes its result file only after all experiment cases finish successfully.
+
+### 11.4. Analyze real-time results
+
+After all three runners complete, run:
+
+```bash
+python benchmarks/realtime/analyze_realtime_results.py
+```
+
+The analyzer validates experiment coverage and reports processed frames, dropped frames, deadline misses, processing latency, end-to-end latency and achieved throughput for every architecture, algorithm and resolution.
+
+The generated files are:
+
+```text
+benchmarks/results/realtime/
+├── pure_python/realtime_frame_results.csv
+├── hybrid/realtime_frame_results.csv
+├── pure_cpp/realtime_frame_results.csv
+└── realtime_summary.csv
+```
+
+With the default configuration, each architecture must produce 30,000 frame records:
+
+```text
+4 algorithms × 3 resolutions × 5 trials × 500 measured frames
+= 30,000 records
+```
+
+Processed and dropped record counts must add up to the expected total.
+
+## 12. Expected output files
 
 After a successful benchmark and analysis run, `benchmarks/results/` must contain:
 
@@ -692,7 +779,7 @@ With the default configuration, each architecture produces:
 
 Warm-up frames are not written to the result files.
 
-## 12. Fair-comparison requirements
+## 13. Fair-comparison requirements
 
 For scientifically meaningful results:
 

@@ -2,8 +2,6 @@
 
 ## 1. Purpose
 
-## Experimental protocols
-
 This protocol defines a reproducible experimental method for evaluating VisionLab image-enhancement algorithms and software architectures under controlled illumination conditions relevant to an autonomous-vehicle vision system.
 
 The experiment separates two questions:

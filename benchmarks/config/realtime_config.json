@@ -1,0 +1,13 @@
+{
+    "schema_version": 1,
+    "target_fps": 30.0,
+    "queue_capacity": 1,
+    "warmup_frames": 30,
+    "measured_frames": 500,
+    "trial_count": 5,
+    "drop_policy": "latest_frame",
+    "deadline_multiplier": 1.0,
+    "output_directory": "benchmarks/results/realtime",
+    "frame_results_file": "realtime_frame_results.csv",
+    "summary_file": "realtime_summary.csv"
+}

@@ -22,6 +22,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Widgets
     OpenGLWidgets
 )
+find_package(Threads REQUIRED)
 
 qt_add_executable(VisionLabCore
     src/main.cpp
@@ -31,7 +32,8 @@ qt_add_executable(VisionLabCore
     src/visionworker.cpp
     mainwindow.h
     mainwindow.cpp
-    src/imageprocess.h src/imageprocess.cpp
+    src/imageprocess.h
+    src/imageprocess.cpp
     resources.qrc
 )
 
@@ -65,6 +67,14 @@ add_executable(
     src/imageprocess.cpp
 )
 
+add_executable(
+    VisionLabCppRealtime
+
+    ../benchmarks/realtime/pure_cpp_realtime.cpp
+    src/imageprocess.h
+    src/imageprocess.cpp
+)
+
 target_include_directories(
     VisionLabCppBenchmark
     PRIVATE
@@ -75,6 +85,14 @@ target_include_directories(
 
 target_include_directories(
     VisionLabCppValidation
+    PRIVATE
+
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+target_include_directories(
+    VisionLabCppRealtime
     PRIVATE
 
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -96,12 +114,29 @@ target_link_libraries(
     Qt6::Core
 )
 
+target_link_libraries(
+    VisionLabCppRealtime
+    PRIVATE
+
+    ${OpenCV_LIBS}
+    Qt6::Core
+    Threads::Threads
+)
+
 target_compile_definitions(
     VisionLabCppBenchmark
     PRIVATE
 
     VISIONLAB_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
     VISIONLAB_BENCHMARK_RELEASE=$<IF:$<CONFIG:Release>,1,0>
+)
+
+target_compile_definitions(
+    VisionLabCppRealtime
+    PRIVATE
+
+    VISIONLAB_PROJECT_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/.."
+    VISIONLAB_REALTIME_RELEASE=$<IF:$<CONFIG:Release>,1,0>
 )
 
 if(WIN32)
@@ -145,7 +180,8 @@ if(WIN32)
             COMMENT
                 "Copying OpenCV runtime DLL files for benchmark"
         )
-	add_custom_command(
+
+        add_custom_command(
             TARGET VisionLabCppValidation
             POST_BUILD
 
@@ -157,6 +193,20 @@ if(WIN32)
 
             COMMENT
                 "Copying OpenCV runtime DLL files for validation"
+        )
+
+        add_custom_command(
+            TARGET VisionLabCppRealtime
+            POST_BUILD
+
+            COMMAND
+                ${CMAKE_COMMAND}
+                -E copy_if_different
+                ${OPENCV_RUNTIME_DLLS}
+                $<TARGET_FILE_DIR:VisionLabCppRealtime>
+
+            COMMENT
+                "Copying OpenCV runtime DLL files for real-time evaluation"
         )
     else()
         message(

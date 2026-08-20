@@ -8,6 +8,12 @@ This guide explains how to reproduce the VisionLab benchmarks across the followi
 
 Run all commands from the repository root (`VisionLab/`) unless otherwise specified.
 
+## Experimental protocols
+
+The controlled-illumination evaluation protocol is documented at:
+
+- [Controlled-illumination evaluation protocol](experiments/controlled_illumination_protocol.md)
+
 ## 1. Prepare the input video
 
 Place the benchmark video at:

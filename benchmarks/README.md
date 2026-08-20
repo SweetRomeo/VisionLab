@@ -712,6 +712,10 @@ cmake \
     --config Release \
     --target VisionLabCppRealtime
 
+# Single-config generators
+./cpp-opencv-core/build/VisionLabCppRealtime
+
+# Multi-config generators
 ./cpp-opencv-core/build/Release/VisionLabCppRealtime
 ```
 
@@ -728,7 +732,7 @@ Each runner writes its result file only after all experiment cases finish succes
 After all three runners complete, run:
 
 ```bash
-python benchmarks/realtime/analyze_realtime_results.py
+python -m benchmarks.realtime.analyze_realtime_results
 ```
 
 The analyzer validates experiment coverage and reports processed frames, dropped frames, deadline misses, processing latency, end-to-end latency and achieved throughput for every architecture, algorithm and resolution.

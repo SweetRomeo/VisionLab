@@ -10,9 +10,10 @@ Run all commands from the repository root (`VisionLab/`) unless otherwise specif
 
 ## Experimental protocols
 
-The controlled-illumination evaluation protocol is documented at:
+The controlled-illumination experiment documentation is available at:
 
 - [Controlled-illumination evaluation protocol](experiments/controlled_illumination_protocol.md)
+- [Controlled-illumination experiment infrastructure](experiments/README.md)
 
 ## 1. Prepare the input video
 

@@ -11,14 +11,43 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
     create_unique_identifier,
     load_controlled_illumination_config,
+    load_run_metadata,
     save_run_metadata_atomic,
     validate_run_metadata,
+)
+
+from benchmarks.experiments.generate_dry_run_metadata import (
+    build_dry_run_metadata,
 )
 
 
 class ControlledIlluminationMetadataTests(
     unittest.TestCase
 ):
+    def test_dry_run_metadata_is_valid(
+        self,
+    ) -> None:
+        metadata = build_dry_run_metadata(
+            self.config,
+            git_commit_sha="b" * 40,
+        )
+
+        self.assertTrue(
+            metadata.dry_run
+        )
+        self.assertEqual(
+            metadata.phase,
+            "constant_lux",
+        )
+        self.assertEqual(
+            metadata.platform,
+            "desktop",
+        )
+
+        validate_run_metadata(
+            metadata,
+            self.config,
+        )
     def setUp(self) -> None:
         self.config = (
             load_controlled_illumination_config()
@@ -177,6 +206,16 @@ class ControlledIlluminationMetadataTests(
             self.assertEqual(
                 temporary_files,
                 [],
+            )
+
+            loaded_metadata = load_run_metadata(
+                output_path,
+                config=self.config,
+            )
+
+            self.assertEqual(
+                loaded_metadata,
+                self.metadata,
             )
 
     def test_invalid_trial_number_is_rejected(

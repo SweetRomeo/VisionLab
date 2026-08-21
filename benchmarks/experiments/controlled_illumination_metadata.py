@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 import json
 import math
@@ -720,8 +720,8 @@ def validate_run_metadata(
         "run_id",
     )
     validate_utc_timestamp(
-        metadata.collected_at_utc,
-        "collected_at_utc",
+        metadata.measured_illuminance.measured_at_utc,
+        "measured_illuminance.measured_at_utc",
     )
 
     required_string_fields = (
@@ -1091,6 +1091,232 @@ def save_run_metadata_atomic(
         )
 
     return metadata_path
+
+def require_metadata_mapping(
+    value: Any,
+    field_name: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} must be an object."
+        )
+
+    return value
+
+
+def require_metadata_value(
+    mapping: dict[str, Any],
+    field_name: str,
+    parent_name: str,
+) -> Any:
+    if field_name not in mapping:
+        raise ControlledIlluminationMetadataError(
+            f"Missing metadata field: "
+            f"{parent_name}.{field_name}"
+        )
+
+    return mapping[field_name]
+
+
+def run_metadata_from_dict(
+    metadata_value: Any,
+    config: dict[str, Any] | None = None,
+) -> ControlledIlluminationRunMetadata:
+    metadata_data = require_metadata_mapping(
+        metadata_value,
+        "metadata root",
+    )
+
+    resolution_data = require_metadata_mapping(
+        require_metadata_value(
+            metadata_data,
+            "resolution",
+            "metadata",
+        ),
+        "metadata.resolution",
+    )
+
+    illuminance_data = require_metadata_mapping(
+        require_metadata_value(
+            metadata_data,
+            "measured_illuminance",
+            "metadata",
+        ),
+        "metadata.measured_illuminance",
+    )
+
+    resolution = ResolutionMetadata(
+        width=require_metadata_value(
+            resolution_data,
+            "width",
+            "metadata.resolution",
+        ),
+        height=require_metadata_value(
+            resolution_data,
+            "height",
+            "metadata.resolution",
+        ),
+    )
+
+    illuminance = IlluminanceMeasurements(
+        centre_lux=require_metadata_value(
+            illuminance_data,
+            "centre_lux",
+            "metadata.measured_illuminance",
+        ),
+        top_left_lux=require_metadata_value(
+            illuminance_data,
+            "top_left_lux",
+            "metadata.measured_illuminance",
+        ),
+        top_right_lux=require_metadata_value(
+            illuminance_data,
+            "top_right_lux",
+            "metadata.measured_illuminance",
+        ),
+        bottom_left_lux=require_metadata_value(
+            illuminance_data,
+            "bottom_left_lux",
+            "metadata.measured_illuminance",
+        ),
+        bottom_right_lux=require_metadata_value(
+            illuminance_data,
+            "bottom_right_lux",
+            "metadata.measured_illuminance",
+        ),
+        measured_at_utc=require_metadata_value(
+            illuminance_data,
+            "measured_at_utc",
+            "metadata.measured_illuminance",
+        ),
+        lux_meter_model=require_metadata_value(
+            illuminance_data,
+            "lux_meter_model",
+            "metadata.measured_illuminance",
+        ),
+        lux_meter_range=require_metadata_value(
+            illuminance_data,
+            "lux_meter_range",
+            "metadata.measured_illuminance",
+        ),
+        lux_meter_resolution=require_metadata_value(
+            illuminance_data,
+            "lux_meter_resolution",
+            "metadata.measured_illuminance",
+        ),
+    )
+
+    expected_summaries = {
+        "mean_lux": illuminance.mean_lux,
+        "minimum_lux": illuminance.minimum_lux,
+        "maximum_lux": illuminance.maximum_lux,
+    }
+
+    for field_name, expected_value in (
+        expected_summaries.items()
+    ):
+        stored_value = require_metadata_value(
+            illuminance_data,
+            field_name,
+            "metadata.measured_illuminance",
+        )
+
+        if (
+            isinstance(stored_value, bool)
+            or not isinstance(
+                stored_value,
+                (int, float),
+            )
+            or not math.isfinite(stored_value)
+            or not math.isclose(
+                stored_value,
+                expected_value,
+                abs_tol=1e-9,
+            )
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Stored illuminance summary does not "
+                f"match measured values: {field_name}"
+            )
+
+    metadata_arguments = dict(metadata_data)
+    metadata_arguments["resolution"] = resolution
+    metadata_arguments[
+        "measured_illuminance"
+    ] = illuminance
+
+    supported_fields = {
+        metadata_field.name
+        for metadata_field in fields(
+            ControlledIlluminationRunMetadata
+        )
+    }
+
+    unexpected_fields = (
+        set(metadata_arguments)
+        - supported_fields
+    )
+
+    if unexpected_fields:
+        raise ControlledIlluminationMetadataError(
+            "Unexpected metadata fields: "
+            f"{sorted(unexpected_fields)}"
+        )
+
+    try:
+        metadata = ControlledIlluminationRunMetadata(
+            **metadata_arguments
+        )
+    except TypeError as error:
+        raise ControlledIlluminationMetadataError(
+            f"Invalid run metadata structure: {error}"
+        ) from error
+
+    active_config = (
+        config
+        if config is not None
+        else load_controlled_illumination_config()
+    )
+
+    validate_run_metadata(
+        metadata,
+        active_config,
+    )
+
+    return metadata
+
+
+def load_run_metadata(
+    metadata_path: str | Path,
+    config: dict[str, Any] | None = None,
+) -> ControlledIlluminationRunMetadata:
+    path = Path(metadata_path)
+
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Run metadata file not found: {path}"
+        )
+
+    try:
+        with path.open(
+            "r",
+            encoding="utf-8",
+        ) as metadata_file:
+            metadata_value = json.load(
+                metadata_file
+            )
+    except json.JSONDecodeError as error:
+        raise ControlledIlluminationMetadataError(
+            f"Invalid metadata JSON in {path}: {error}"
+        ) from error
+
+    return run_metadata_from_dict(
+        metadata_value,
+        config=config,
+    )
 
 
 def main() -> None:

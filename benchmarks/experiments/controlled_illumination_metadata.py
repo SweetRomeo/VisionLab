@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +52,196 @@ REQUIRED_RUN_METADATA_FIELDS = {
 
 class ControlledIlluminationConfigError(ValueError):
     """Raised when the experiment configuration is invalid."""
+
+class ControlledIlluminationMetadataError(ValueError):
+    """Raised when controlled-illumination metadata is invalid."""
+
+
+def create_utc_timestamp() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def create_unique_identifier(
+    prefix: str,
+) -> str:
+    normalized_prefix = prefix.strip().lower().replace(
+        " ",
+        "-",
+    )
+
+    if not normalized_prefix:
+        raise ControlledIlluminationMetadataError(
+            "Identifier prefix must not be empty."
+        )
+
+    timestamp = datetime.now(timezone.utc).strftime(
+        "%Y%m%dT%H%M%S%fZ"
+    )
+    random_suffix = uuid4().hex[:8]
+
+    return (
+        f"{normalized_prefix}-"
+        f"{timestamp}-"
+        f"{random_suffix}"
+    )
+
+
+@dataclass(frozen=True)
+class ResolutionMetadata:
+    width: int
+    height: int
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.width, bool)
+            or not isinstance(self.width, int)
+            or self.width <= 0
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Resolution width must be a positive integer."
+            )
+
+        if (
+            isinstance(self.height, bool)
+            or not isinstance(self.height, int)
+            or self.height <= 0
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Resolution height must be a positive integer."
+            )
+
+
+@dataclass(frozen=True)
+class IlluminanceMeasurements:
+    centre_lux: float
+    top_left_lux: float
+    top_right_lux: float
+    bottom_left_lux: float
+    bottom_right_lux: float
+    measured_at_utc: str
+    lux_meter_model: str
+    lux_meter_range: str
+    lux_meter_resolution: str
+
+    def __post_init__(self) -> None:
+        for field_name, value in self.position_values.items():
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+            ):
+                raise ControlledIlluminationMetadataError(
+                    f"{field_name} must be a non-negative "
+                    "finite number."
+                )
+
+        for field_name, value in (
+            ("measured_at_utc", self.measured_at_utc),
+            ("lux_meter_model", self.lux_meter_model),
+            ("lux_meter_range", self.lux_meter_range),
+            (
+                "lux_meter_resolution",
+                self.lux_meter_resolution,
+            ),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ControlledIlluminationMetadataError(
+                    f"{field_name} must be a non-empty string."
+                )
+
+    @property
+    def position_values(self) -> dict[str, float]:
+        return {
+            "centre_lux": float(self.centre_lux),
+            "top_left_lux": float(self.top_left_lux),
+            "top_right_lux": float(self.top_right_lux),
+            "bottom_left_lux": float(
+                self.bottom_left_lux
+            ),
+            "bottom_right_lux": float(
+                self.bottom_right_lux
+            ),
+        }
+
+    @property
+    def mean_lux(self) -> float:
+        values = list(self.position_values.values())
+        return sum(values) / len(values)
+
+    @property
+    def minimum_lux(self) -> float:
+        return min(self.position_values.values())
+
+    @property
+    def maximum_lux(self) -> float:
+        return max(self.position_values.values())
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            **self.position_values,
+            "mean_lux": self.mean_lux,
+            "minimum_lux": self.minimum_lux,
+            "maximum_lux": self.maximum_lux,
+            "measured_at_utc": self.measured_at_utc,
+            "lux_meter_model": self.lux_meter_model,
+            "lux_meter_range": self.lux_meter_range,
+            "lux_meter_resolution": (
+                self.lux_meter_resolution
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class ControlledIlluminationRunMetadata:
+    experiment_id: str
+    run_id: str
+    collected_at_utc: str
+    git_commit_sha: str
+    phase: str
+    device_id: str
+    operating_system: str
+    platform: str
+    architecture: str
+    algorithm: str
+    algorithm_parameters: dict[str, Any]
+    resolution: ResolutionMetadata
+    trial_number: int
+    target_fps: float
+    frame_deadline_ms: float
+    target_illuminance_lux: float | None
+    measured_illuminance: IlluminanceMeasurements
+    incidence_angle_degrees: float
+    source_output_setting: str | float | int
+    camera_mode: str
+    camera_settings: dict[str, Any]
+    camera_to_target_distance_metres: float
+    light_to_target_distance_metres: float
+    input_scene_id: str
+    power_mode: str
+    clock_configuration: str
+    starting_temperature_celsius: float
+    ending_temperature_celsius: float
+    maximum_temperature_celsius: float
+    thermal_throttling_detected: bool
+    software_versions: dict[str, str]
+    dry_run: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        metadata = asdict(self)
+
+        metadata["resolution"] = asdict(
+            self.resolution
+        )
+        metadata["measured_illuminance"] = (
+            self.measured_illuminance.to_dict()
+        )
+
+        return metadata
 
 
 def require_mapping(
@@ -469,6 +663,434 @@ def load_controlled_illumination_config(
     validate_controlled_illumination_config(config)
 
     return config
+
+def validate_utc_timestamp(
+    value: str,
+    field_name: str,
+) -> None:
+    require_non_empty_string(value, field_name)
+
+    try:
+        parsed_timestamp = datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        )
+    except ValueError as error:
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} must be a valid ISO 8601 timestamp."
+        ) from error
+
+    if (
+        parsed_timestamp.tzinfo is None
+        or parsed_timestamp.utcoffset()
+        != timezone.utc.utcoffset(parsed_timestamp)
+    ):
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} must use UTC."
+        )
+
+
+def validate_safe_identifier(
+    value: str,
+    field_name: str,
+) -> None:
+    require_non_empty_string(value, field_name)
+
+    if (
+        value in {".", ".."}
+        or "/" in value
+        or "\\" in value
+    ):
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} contains invalid path characters."
+        )
+
+
+def validate_run_metadata(
+    metadata: ControlledIlluminationRunMetadata,
+    config: dict[str, Any],
+) -> None:
+    validate_controlled_illumination_config(config)
+
+    validate_safe_identifier(
+        metadata.experiment_id,
+        "experiment_id",
+    )
+    validate_safe_identifier(
+        metadata.run_id,
+        "run_id",
+    )
+    validate_utc_timestamp(
+        metadata.collected_at_utc,
+        "collected_at_utc",
+    )
+
+    required_string_fields = (
+        "device_id",
+        "operating_system",
+        "platform",
+        "architecture",
+        "algorithm",
+        "camera_mode",
+        "input_scene_id",
+        "power_mode",
+        "clock_configuration",
+    )
+
+    for field_name in required_string_fields:
+        require_non_empty_string(
+            getattr(metadata, field_name),
+            field_name,
+        )
+
+    git_commit_sha = metadata.git_commit_sha.lower()
+
+    if (
+        len(git_commit_sha) != 40
+        or any(
+            character not in "0123456789abcdef"
+            for character in git_commit_sha
+        )
+    ):
+        raise ControlledIlluminationMetadataError(
+            "git_commit_sha must contain a full "
+            "40-character hexadecimal commit SHA."
+        )
+
+    phase_names = {
+        phase["name"]
+        for phase in config["phases"]
+    }
+
+    if metadata.phase not in phase_names:
+        raise ControlledIlluminationMetadataError(
+            f"Unsupported experiment phase: {metadata.phase}"
+        )
+
+    matrix = config["experiment_matrix"]
+
+    for field_name, value, allowed_values in (
+        (
+            "platform",
+            metadata.platform,
+            matrix["platforms"],
+        ),
+        (
+            "architecture",
+            metadata.architecture,
+            matrix["architectures"],
+        ),
+        (
+            "algorithm",
+            metadata.algorithm,
+            matrix["algorithms"],
+        ),
+    ):
+        if value not in allowed_values:
+            raise ControlledIlluminationMetadataError(
+                f"Unsupported {field_name}: {value}"
+            )
+
+    resolution_pair = (
+        metadata.resolution.width,
+        metadata.resolution.height,
+    )
+
+    allowed_resolutions = {
+        (
+            resolution["width"],
+            resolution["height"],
+        )
+        for resolution in matrix["resolutions"]
+    }
+
+    if resolution_pair not in allowed_resolutions:
+        raise ControlledIlluminationMetadataError(
+            "Unsupported resolution: "
+            f"{resolution_pair[0]}x{resolution_pair[1]}"
+        )
+
+    trial_count = matrix["trial_count"]
+
+    if (
+        isinstance(metadata.trial_number, bool)
+        or not isinstance(metadata.trial_number, int)
+        or metadata.trial_number < 1
+        or metadata.trial_number > trial_count
+    ):
+        raise ControlledIlluminationMetadataError(
+            "trial_number must be between "
+            f"1 and {trial_count}."
+        )
+
+    allowed_angles = matrix[
+        "incidence_angles_degrees"
+    ]
+
+    if not any(
+        math.isclose(
+            metadata.incidence_angle_degrees,
+            allowed_angle,
+            abs_tol=1e-9,
+        )
+        for allowed_angle in allowed_angles
+    ):
+        raise ControlledIlluminationMetadataError(
+            "Unsupported incidence angle: "
+            f"{metadata.incidence_angle_degrees}"
+        )
+
+    target_levels = matrix[
+        "target_illuminance_levels_lux"
+    ]
+
+    if metadata.phase == "constant_lux":
+        if metadata.target_illuminance_lux is None:
+            raise ControlledIlluminationMetadataError(
+                "constant_lux runs require "
+                "target_illuminance_lux."
+            )
+
+        if not any(
+            math.isclose(
+                metadata.target_illuminance_lux,
+                target_level,
+                abs_tol=1e-9,
+            )
+            for target_level in target_levels
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Unsupported target illuminance: "
+                f"{metadata.target_illuminance_lux}"
+            )
+
+    if (
+        metadata.phase == "constant_source"
+        and metadata.target_illuminance_lux is not None
+    ):
+        raise ControlledIlluminationMetadataError(
+            "constant_source runs must not define "
+            "target_illuminance_lux."
+        )
+
+    execution = config["execution"]
+
+    if not math.isclose(
+        metadata.target_fps,
+        execution["target_fps"],
+        abs_tol=1e-9,
+    ):
+        raise ControlledIlluminationMetadataError(
+            "target_fps does not match the experiment config."
+        )
+
+    expected_deadline_ms = (
+        1000.0
+        / execution["target_fps"]
+        * execution["deadline_multiplier"]
+    )
+
+    if not math.isclose(
+        metadata.frame_deadline_ms,
+        expected_deadline_ms,
+        abs_tol=0.01,
+    ):
+        raise ControlledIlluminationMetadataError(
+            "frame_deadline_ms does not match "
+            "the configured frame deadline."
+        )
+
+    if not isinstance(
+        metadata.algorithm_parameters,
+        dict,
+    ):
+        raise ControlledIlluminationMetadataError(
+            "algorithm_parameters must be an object."
+        )
+
+    camera_modes = config["camera_modes"]
+
+    if metadata.camera_mode not in camera_modes:
+        raise ControlledIlluminationMetadataError(
+            f"Unsupported camera mode: {metadata.camera_mode}"
+        )
+
+    if (
+        not isinstance(metadata.camera_settings, dict)
+        or not metadata.camera_settings
+    ):
+        raise ControlledIlluminationMetadataError(
+            "camera_settings must be a non-empty object."
+        )
+
+    required_camera_settings = set(
+        camera_modes[metadata.camera_mode].get(
+            "required_settings",
+            [],
+        )
+    )
+
+    missing_camera_settings = (
+        required_camera_settings
+        - set(metadata.camera_settings)
+    )
+
+    if missing_camera_settings:
+        raise ControlledIlluminationMetadataError(
+            "Missing camera settings: "
+            f"{sorted(missing_camera_settings)}"
+        )
+
+    for field_name, distance in (
+        (
+            "camera_to_target_distance_metres",
+            metadata.camera_to_target_distance_metres,
+        ),
+        (
+            "light_to_target_distance_metres",
+            metadata.light_to_target_distance_metres,
+        ),
+    ):
+        require_positive_number(
+            distance,
+            field_name,
+        )
+
+    temperatures = {
+        "starting_temperature_celsius": (
+            metadata.starting_temperature_celsius
+        ),
+        "ending_temperature_celsius": (
+            metadata.ending_temperature_celsius
+        ),
+        "maximum_temperature_celsius": (
+            metadata.maximum_temperature_celsius
+        ),
+    }
+
+    for field_name, temperature in temperatures.items():
+        if (
+            isinstance(temperature, bool)
+            or not isinstance(temperature, (int, float))
+            or not math.isfinite(temperature)
+        ):
+            raise ControlledIlluminationMetadataError(
+                f"{field_name} must be a finite number."
+            )
+
+    if metadata.maximum_temperature_celsius < max(
+        metadata.starting_temperature_celsius,
+        metadata.ending_temperature_celsius,
+    ):
+        raise ControlledIlluminationMetadataError(
+            "maximum_temperature_celsius cannot be lower "
+            "than the starting or ending temperature."
+        )
+
+    if not isinstance(
+        metadata.thermal_throttling_detected,
+        bool,
+    ):
+        raise ControlledIlluminationMetadataError(
+            "thermal_throttling_detected must be boolean."
+        )
+
+    source_output = metadata.source_output_setting
+
+    if isinstance(source_output, str):
+        require_non_empty_string(
+            source_output,
+            "source_output_setting",
+        )
+    elif (
+        isinstance(source_output, bool)
+        or not isinstance(source_output, (int, float))
+        or not math.isfinite(source_output)
+        or source_output < 0
+    ):
+        raise ControlledIlluminationMetadataError(
+            "source_output_setting must be a non-negative "
+            "number or a non-empty string."
+        )
+
+    if (
+        not isinstance(metadata.software_versions, dict)
+        or not metadata.software_versions
+    ):
+        raise ControlledIlluminationMetadataError(
+            "software_versions must be a non-empty object."
+        )
+
+
+def save_run_metadata_atomic(
+    metadata: ControlledIlluminationRunMetadata,
+    config: dict[str, Any] | None = None,
+    output_path: str | Path | None = None,
+) -> Path:
+    active_config = (
+        config
+        if config is not None
+        else load_controlled_illumination_config()
+    )
+
+    validate_run_metadata(
+        metadata,
+        active_config,
+    )
+
+    if output_path is None:
+        metadata_path = (
+            PROJECT_ROOT
+            / active_config["output"]["directory"]
+            / metadata.platform
+            / metadata.experiment_id
+            / metadata.run_id
+            / active_config["output"][
+                "metadata_file_name"
+            ]
+        )
+    else:
+        metadata_path = Path(output_path)
+
+        if not metadata_path.is_absolute():
+            metadata_path = (
+                PROJECT_ROOT / metadata_path
+            )
+
+    metadata_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = metadata_path.with_name(
+        f".{metadata_path.name}."
+        f"{uuid4().hex}.tmp"
+    )
+
+    try:
+        with temporary_path.open(
+            "w",
+            encoding="utf-8",
+        ) as output_file:
+            json.dump(
+                metadata.to_dict(),
+                output_file,
+                indent=2,
+                ensure_ascii=False,
+            )
+            output_file.write("\n")
+            output_file.flush()
+            os.fsync(output_file.fileno())
+
+        os.replace(
+            temporary_path,
+            metadata_path,
+        )
+    finally:
+        temporary_path.unlink(
+            missing_ok=True,
+        )
+
+    return metadata_path
 
 
 def main() -> None:

@@ -25,7 +25,7 @@ class ControlledIlluminationMetadataTests(
     unittest.TestCase
 ):
     def test_dry_run_metadata_is_valid(
-        self,
+            self,
     ) -> None:
         metadata = build_dry_run_metadata(
             self.config,
@@ -48,6 +48,7 @@ class ControlledIlluminationMetadataTests(
             metadata,
             self.config,
         )
+
     def setUp(self) -> None:
         self.config = (
             load_controlled_illumination_config()
@@ -91,7 +92,7 @@ class ControlledIlluminationMetadataTests(
                 trial_number=1,
                 target_fps=30.0,
                 frame_deadline_ms=(
-                    1000.0 / 30.0
+                        1000.0 / 30.0
                 ),
                 target_illuminance_lux=50.0,
                 measured_illuminance=(
@@ -134,7 +135,7 @@ class ControlledIlluminationMetadataTests(
         )
 
     def test_valid_metadata_passes_validation(
-        self,
+            self,
     ) -> None:
         validate_run_metadata(
             self.metadata,
@@ -142,7 +143,7 @@ class ControlledIlluminationMetadataTests(
         )
 
     def test_illuminance_summary_is_calculated(
-        self,
+            self,
     ) -> None:
         self.assertEqual(
             self.illuminance.mean_lux,
@@ -158,12 +159,12 @@ class ControlledIlluminationMetadataTests(
         )
 
     def test_metadata_is_saved_atomically(
-        self,
+            self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output_path = (
-                Path(directory)
-                / "run_metadata.json"
+                    Path(directory)
+                    / "run_metadata.json"
             )
 
             saved_path = save_run_metadata_atomic(
@@ -181,8 +182,8 @@ class ControlledIlluminationMetadataTests(
             )
 
             with output_path.open(
-                "r",
-                encoding="utf-8",
+                    "r",
+                    encoding="utf-8",
             ) as metadata_file:
                 saved_metadata = json.load(
                     metadata_file
@@ -219,7 +220,7 @@ class ControlledIlluminationMetadataTests(
             )
 
     def test_invalid_trial_number_is_rejected(
-        self,
+            self,
     ) -> None:
         invalid_metadata = replace(
             self.metadata,
@@ -227,7 +228,7 @@ class ControlledIlluminationMetadataTests(
         )
 
         with self.assertRaises(
-            ControlledIlluminationMetadataError
+                ControlledIlluminationMetadataError
         ):
             validate_run_metadata(
                 invalid_metadata,
@@ -235,7 +236,7 @@ class ControlledIlluminationMetadataTests(
             )
 
     def test_invalid_incidence_angle_is_rejected(
-        self,
+            self,
     ) -> None:
         invalid_metadata = replace(
             self.metadata,
@@ -243,7 +244,7 @@ class ControlledIlluminationMetadataTests(
         )
 
         with self.assertRaises(
-            ControlledIlluminationMetadataError
+                ControlledIlluminationMetadataError
         ):
             validate_run_metadata(
                 invalid_metadata,
@@ -251,7 +252,7 @@ class ControlledIlluminationMetadataTests(
             )
 
     def test_constant_source_rejects_target_lux(
-        self,
+            self,
     ) -> None:
         invalid_metadata = replace(
             self.metadata,
@@ -260,7 +261,7 @@ class ControlledIlluminationMetadataTests(
         )
 
         with self.assertRaises(
-            ControlledIlluminationMetadataError
+                ControlledIlluminationMetadataError
         ):
             validate_run_metadata(
                 invalid_metadata,
@@ -268,7 +269,7 @@ class ControlledIlluminationMetadataTests(
             )
 
     def test_missing_camera_setting_is_rejected(
-        self,
+            self,
     ) -> None:
         camera_settings = dict(
             self.metadata.camera_settings
@@ -281,7 +282,7 @@ class ControlledIlluminationMetadataTests(
         )
 
         with self.assertRaises(
-            ControlledIlluminationMetadataError
+                ControlledIlluminationMetadataError
         ):
             validate_run_metadata(
                 invalid_metadata,
@@ -289,10 +290,10 @@ class ControlledIlluminationMetadataTests(
             )
 
     def test_negative_lux_is_rejected(
-        self,
+            self,
     ) -> None:
         with self.assertRaises(
-            ControlledIlluminationMetadataError
+                ControlledIlluminationMetadataError
         ):
             IlluminanceMeasurements(
                 centre_lux=-1.0,
@@ -309,7 +310,7 @@ class ControlledIlluminationMetadataTests(
             )
 
     def test_generated_identifiers_are_unique(
-        self,
+            self,
     ) -> None:
         first_identifier = (
             create_unique_identifier("run")
@@ -325,6 +326,54 @@ class ControlledIlluminationMetadataTests(
         self.assertTrue(
             first_identifier.startswith("run-")
         )
+
+    def test_invalid_collected_timestamp_is_rejected(
+        self,
+    ) -> None:
+        invalid_metadata = replace(
+            self.metadata,
+            collected_at_utc="invalid",
+        )
+
+        with self.assertRaises(
+            ControlledIlluminationMetadataError
+        ):
+            validate_run_metadata(
+                invalid_metadata,
+                self.config,
+            )
+
+    def test_non_string_git_sha_is_rejected(
+        self,
+    ) -> None:
+        invalid_metadata = replace(
+            self.metadata,
+            git_commit_sha=123,  # type: ignore[arg-type]
+        )
+
+        with self.assertRaises(
+            ControlledIlluminationMetadataError
+        ):
+            validate_run_metadata(
+                invalid_metadata,
+                self.config,
+            )
+
+    def test_non_numeric_incidence_angle_is_rejected(
+        self,
+    ) -> None:
+        invalid_metadata = replace(
+            self.metadata,
+            incidence_angle_degrees="invalid",  # type: ignore[arg-type]
+        )
+
+        with self.assertRaises(
+            ControlledIlluminationMetadataError
+        ):
+            validate_run_metadata(
+                invalid_metadata,
+                self.config,
+            )
 
 
 if __name__ == "__main__":

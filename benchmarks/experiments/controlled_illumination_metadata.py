@@ -703,7 +703,21 @@ def validate_safe_identifier(
         raise ControlledIlluminationMetadataError(
             f"{field_name} contains invalid path characters."
         )
+    
+def require_finite_metadata_number(
+    value: Any,
+    field_name: str,
+) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} must be a finite number."
+        )
 
+    return float(value)
 
 def validate_run_metadata(
     metadata: ControlledIlluminationRunMetadata,
@@ -837,9 +851,16 @@ def validate_run_metadata(
         "incidence_angles_degrees"
     ]
 
+    incidence_angle_degrees = (
+        require_finite_metadata_number(
+            metadata.incidence_angle_degrees,
+            "incidence_angle_degrees",
+        )
+    )
+
     if not any(
         math.isclose(
-            metadata.incidence_angle_degrees,
+            incidence_angle_degrees,
             allowed_angle,
             abs_tol=1e-9,
         )
@@ -860,10 +881,16 @@ def validate_run_metadata(
                 "constant_lux runs require "
                 "target_illuminance_lux."
             )
+        target_illuminance_lux = (
+            require_finite_metadata_number(
+                metadata.target_illuminance_lux,
+                "target_illuminance_lux",
+            )
+        )
 
         if not any(
             math.isclose(
-                metadata.target_illuminance_lux,
+                target_illuminance_lux,
                 target_level,
                 abs_tol=1e-9,
             )
@@ -885,8 +912,13 @@ def validate_run_metadata(
 
     execution = config["execution"]
 
-    if not math.isclose(
+    target_fps = require_finite_metadata_number(
         metadata.target_fps,
+        "target_fps",
+    )
+
+    if not math.isclose(
+        target_fps,
         execution["target_fps"],
         abs_tol=1e-9,
     ):
@@ -900,8 +932,13 @@ def validate_run_metadata(
         * execution["deadline_multiplier"]
     )
 
-    if not math.isclose(
+    frame_deadline_ms = require_finite_metadata_number(
         metadata.frame_deadline_ms,
+        "frame_deadline_ms",
+    )
+    
+    if not math.isclose(
+        frame_deadline_ms,
         expected_deadline_ms,
         abs_tol=0.01,
     ):

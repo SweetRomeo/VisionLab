@@ -719,6 +719,7 @@ def require_finite_metadata_number(
 
     return float(value)
 
+
 def validate_run_metadata(
     metadata: ControlledIlluminationRunMetadata,
     config: dict[str, Any],
@@ -766,8 +767,6 @@ def validate_run_metadata(
         )
 
     git_commit_sha = metadata.git_commit_sha.lower()
-
-
 
     if (
         len(git_commit_sha) != 40

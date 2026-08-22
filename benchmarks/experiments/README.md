@@ -1,0 +1,294 @@
+# Controlled-Illumination Experiment Infrastructure
+
+This directory contains the configuration, metadata and validation infrastructure used to prepare and execute VisionLab controlled-illumination experiments.
+
+The scientific experiment procedure is defined in:
+
+```text
+benchmarks/experiments/controlled_illumination_protocol.md
+```
+
+The infrastructure in this directory does not perform the physical experiment automatically. It ensures that each experiment run is configurable, traceable, reproducible and validated before its results are analyzed.
+
+## Components
+
+| File                                                      | Purpose                                                                                                          |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `config/controlled_illumination_config.json`              | Defines the experiment phases, lighting conditions, algorithms, architectures, platforms and execution settings. |
+| `controlled_illumination_metadata.py`                     | Defines metadata models, configuration validation, run validation and atomic JSON storage.                       |
+| `generate_dry_run_metadata.py`                            | Generates a validated metadata example without requiring experiment hardware.                                    |
+| `validate_controlled_illumination_metadata.py`            | Validates one or more saved run metadata files.                                                                  |
+| `tests/test_controlled_illumination_metadata.py`          | Tests configuration, measurement, metadata and storage behavior.                                                 |
+| `tests/test_validate_controlled_illumination_metadata.py` | Tests the metadata-validation CLI.                                                                               |
+
+## Experiment phases
+
+Two experiment phases are represented separately.
+
+### Constant-lux phase
+
+The light-source output is adjusted until the required target-plane illuminance is reached. The incidence angle is then varied while the target illuminance is kept approximately constant.
+
+Metadata field:
+
+```text
+phase = constant_lux
+```
+
+A `constant_lux` run must define `target_illuminance_lux`.
+
+### Constant-source phase
+
+The light-source output setting remains fixed while the incidence angle is changed. The resulting illuminance is measured rather than controlled.
+
+Metadata field:
+
+```text
+phase = constant_source
+```
+
+A `constant_source` run must not define `target_illuminance_lux`. The measured centre and corner lux values are still required.
+
+Results from the two phases must not be combined as though they represented the same experimental condition.
+
+## Configuration
+
+The shared configuration file is:
+
+```text
+benchmarks/experiments/config/controlled_illumination_config.json
+```
+
+It defines:
+
+* Target illuminance levels
+* Light-incidence angles
+* Algorithms
+* Software architectures
+* Computing platforms
+* Resolutions
+* Trial count
+* Target frame rate
+* Warm-up and measured frame counts
+* Queue capacity and drop policy
+* Camera modes
+* Illuminance-measurement positions
+* Required run metadata
+* Output directory
+
+The algorithm names and parameters must remain compatible with:
+
+```text
+benchmarks/config/benchmark_config.json
+```
+
+Real-time execution settings must remain compatible with:
+
+```text
+benchmarks/config/realtime_config.json
+```
+
+Validate the configuration from the repository root:
+
+```bash
+python benchmarks/experiments/controlled_illumination_metadata.py
+```
+
+Expected output:
+
+```text
+Controlled-illumination configuration is valid.
+```
+
+## Dry-run metadata
+
+A dry run validates the metadata workflow without a lux meter, camera, Raspberry Pi or NVIDIA Jetson device.
+
+Run it from the repository root:
+
+```bash
+python -m benchmarks.experiments.generate_dry_run_metadata
+```
+
+The command:
+
+1. Loads and validates the experiment configuration.
+2. Reads the current Git commit SHA.
+3. Generates unique experiment and run identifiers.
+4. Creates placeholder camera, lighting and platform measurements.
+5. Validates the completed metadata record.
+6. Writes the metadata file atomically.
+
+Expected output begins with:
+
+```text
+Controlled-illumination dry run passed.
+Experiment ID:
+Run ID:
+Metadata created:
+```
+
+Dry-run records contain:
+
+```text
+dry_run = true
+```
+
+Dry-run records are infrastructure tests and must never be interpreted as physical experiment results.
+
+## Output structure
+
+By default, metadata files are written under:
+
+```text
+benchmarks/results/controlled_illumination/
+```
+
+The directory structure is:
+
+```text
+benchmarks/results/controlled_illumination/
+└── <platform>/
+    └── <experiment_id>/
+        └── <run_id>/
+            └── run_metadata.json
+```
+
+Generated results must not be committed to Git.
+
+After generating a dry run, verify this with:
+
+```bash
+git status --short
+```
+
+The generated `run_metadata.json` file should not appear.
+
+## Metadata validation
+
+Validate a single metadata file:
+
+```bash
+python -m \
+benchmarks.experiments.validate_controlled_illumination_metadata \
+path/to/run_metadata.json
+```
+
+Validate multiple metadata files:
+
+```bash
+python -m \
+benchmarks.experiments.validate_controlled_illumination_metadata \
+path/to/first/run_metadata.json \
+path/to/second/run_metadata.json
+```
+
+Use a custom configuration when required:
+
+```bash
+python -m \
+benchmarks.experiments.validate_controlled_illumination_metadata \
+--config path/to/controlled_illumination_config.json \
+path/to/run_metadata.json
+```
+
+Successful validation ends with:
+
+```text
+Controlled-illumination metadata validation passed.
+```
+
+A metadata record is rejected when it contains conditions such as:
+
+* Missing required fields
+* Invalid experiment phases
+* Unsupported algorithms, architectures or platforms
+* Unsupported resolutions
+* Invalid trial numbers
+* Unsupported incidence angles
+* Invalid constant-lux or constant-source fields
+* Missing camera settings
+* Invalid timestamps
+* Invalid Git commit SHAs
+* Inconsistent illuminance summaries
+* Invalid temperature measurements
+* Invalid frame deadlines
+* Unexpected metadata fields
+
+## Illuminance measurements
+
+Lux must be recorded at five target-plane positions:
+
+* Centre
+* Top left
+* Top right
+* Bottom left
+* Bottom right
+
+The metadata infrastructure calculates:
+
+* Mean lux
+* Minimum lux
+* Maximum lux
+
+When metadata is loaded, the stored summary values are recalculated and compared with the five original measurements. A modified or inconsistent summary is rejected.
+
+## Atomic storage
+
+Metadata is first written to a temporary file in the destination directory. The temporary file is flushed to disk and then atomically moved to the final `run_metadata.json` path.
+
+This prevents an interrupted write from leaving a partially written official metadata file.
+
+## Running the tests
+
+Run all controlled-illumination tests from the repository root:
+
+```bash
+python -m unittest discover \
+-s benchmarks/experiments/tests \
+-p "test_*.py" \
+-v
+```
+
+The tests cover:
+
+* Valid configuration loading
+* Lux summary calculation
+* Invalid lux rejection
+* Experiment-condition validation
+* Trial and incidence-angle validation
+* Camera-setting validation
+* Unique identifier generation
+* Atomic metadata storage
+* JSON metadata loading
+* Dry-run metadata generation
+* CLI success behavior
+* CLI failure behavior
+
+All tests must pass before publishing changes or collecting official experiment results.
+
+## Official experiment workflow
+
+For each official experiment run:
+
+1. Confirm that the working tree is clean.
+2. Record the full Git commit SHA.
+3. Select the experiment phase.
+4. Configure the platform, architecture, algorithm and resolution.
+5. Fix and record the camera settings.
+6. Configure the light source and incidence angle.
+7. Measure lux at all five target positions.
+8. Record device temperature and power settings.
+9. Execute the warm-up and measured frames.
+10. Complete and validate the run metadata.
+11. Save the metadata atomically.
+12. Validate the generated file with the CLI.
+13. Archive the raw results, configuration and metadata together.
+
+Official results must not be used when metadata validation fails.
+
+## Current scope
+
+The current infrastructure supports configuration and metadata preparation on the desktop reference platform.
+
+Physical measurements, Raspberry Pi deployment, NVIDIA Jetson deployment, hardware-specific acceleration and final architecture selection remain separate future stages.

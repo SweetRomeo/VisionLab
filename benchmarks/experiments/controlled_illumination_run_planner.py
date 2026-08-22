@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 import math
 from typing import Any
 from itertools import product
+from random import Random
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -611,3 +612,111 @@ def build_run_conditions(
             )
 
     return tuple(conditions)
+
+def build_run_plan(
+    config: dict[str, Any],
+    *,
+    experiment_id: str,
+    generated_at_utc: str,
+) -> ControlledIlluminationRunPlan:
+    require_non_empty_plan_string(
+        experiment_id,
+        "experiment_id",
+    )
+
+    try:
+        validate_utc_timestamp(
+            generated_at_utc,
+            "generated_at_utc",
+        )
+    except ValueError as error:
+        raise ControlledIlluminationRunPlanError(
+            str(error)
+        ) from error
+
+    execution = config.get("execution")
+
+    if not isinstance(execution, dict):
+        raise ControlledIlluminationRunPlanError(
+            "execution must be an object."
+        )
+
+    randomized = execution.get(
+        "randomize_run_order"
+    )
+    randomization_seed = execution.get(
+        "randomization_seed"
+    )
+
+    if not isinstance(randomized, bool):
+        raise ControlledIlluminationRunPlanError(
+            "execution.randomize_run_order must "
+            "be boolean."
+        )
+
+    if (
+        isinstance(randomization_seed, bool)
+        or not isinstance(randomization_seed, int)
+        or randomization_seed < 0
+    ):
+        raise ControlledIlluminationRunPlanError(
+            "execution.randomization_seed must be "
+            "a non-negative integer."
+        )
+
+    conditions = list(
+        build_run_conditions(config)
+    )
+
+    if randomized:
+        Random(randomization_seed).shuffle(
+            conditions
+        )
+
+    run_number_width = max(
+        4,
+        len(str(len(conditions))),
+    )
+
+    planned_runs = tuple(
+        PlannedRun(
+            execution_order=execution_order,
+            experiment_id=experiment_id,
+            run_id=(
+                f"{experiment_id}-run-"
+                f"{execution_order:0{run_number_width}d}"
+            ),
+            phase=condition.phase,
+            platform=condition.platform,
+            architecture=condition.architecture,
+            algorithm=condition.algorithm,
+            resolution=condition.resolution,
+            trial_number=condition.trial_number,
+            incidence_angle_degrees=(
+                condition.incidence_angle_degrees
+            ),
+            target_illuminance_lux=(
+                condition.target_illuminance_lux
+            ),
+            source_output_setting=(
+                condition.source_output_setting
+            ),
+            target_fps=condition.target_fps,
+            frame_deadline_ms=(
+                condition.frame_deadline_ms
+            ),
+        )
+        for execution_order, condition in enumerate(
+            conditions,
+            start=1,
+        )
+    )
+
+    return ControlledIlluminationRunPlan(
+        schema_version=1,
+        generated_at_utc=generated_at_utc,
+        experiment_id=experiment_id,
+        randomized=randomized,
+        randomization_seed=randomization_seed,
+        runs=planned_runs,
+    )

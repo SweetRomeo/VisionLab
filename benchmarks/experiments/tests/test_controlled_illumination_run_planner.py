@@ -11,6 +11,7 @@ from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlanError,
     PlannedRun,
     build_run_conditions,
+    build_run_plan,
 )
 
 
@@ -54,6 +55,45 @@ class ControlledIlluminationRunPlannerTests(
             randomization_seed=20260821,
             runs=runs,
         )
+
+    def build_small_matrix_config(self) -> dict:
+        config = self.load_experiment_config()
+        matrix = config["experiment_matrix"]
+
+        matrix[
+            "target_illuminance_levels_lux"
+        ] = [5, 50]
+        matrix[
+            "source_output_settings"
+        ] = [25, 50]
+        matrix[
+            "incidence_angles_degrees"
+        ] = [0, 30]
+        matrix["algorithms"] = [
+            "original",
+            "clahe",
+        ]
+        matrix["architectures"] = [
+            "pure_python",
+            "pure_cpp",
+        ]
+        matrix["platforms"] = ["desktop"]
+        matrix["resolutions"] = [
+            {
+                "width": 640,
+                "height": 480,
+            }
+        ]
+        matrix["trial_count"] = 2
+
+        config["execution"][
+            "randomize_run_order"
+        ] = True
+        config["execution"][
+            "randomization_seed"
+        ] = 20260821
+
+        return config
 
     def test_valid_plan_is_serialized(
         self,
@@ -245,12 +285,12 @@ class ControlledIlluminationRunPlannerTests(
         )
 
         expected_constant_lux_count = (
-                common_condition_count
-                * len(
-            matrix[
-                "target_illuminance_levels_lux"
-            ]
-        )
+            common_condition_count
+            * len(
+                matrix[
+                    "target_illuminance_levels_lux"
+                ]
+            )
         )
         expected_constant_source_count = (
                 common_condition_count
@@ -301,6 +341,80 @@ class ControlledIlluminationRunPlannerTests(
                     duplicate_condition,
                 )
             )
+
+    def test_same_seed_produces_same_run_order(
+            self,
+    ) -> None:
+        config = self.build_small_matrix_config()
+
+        first_plan = build_run_plan(
+            config,
+            experiment_id="experiment-seeded",
+            generated_at_utc=(
+                "2026-08-22T12:00:00Z"
+            ),
+        )
+        second_plan = build_run_plan(
+            config,
+            experiment_id="experiment-seeded",
+            generated_at_utc=(
+                "2026-08-22T12:00:00Z"
+            ),
+        )
+
+        self.assertEqual(
+            [
+                planned_run.condition_key
+                for planned_run in first_plan.runs
+            ],
+            [
+                planned_run.condition_key
+                for planned_run in second_plan.runs
+            ],
+        )
+        self.assertEqual(
+            [
+                planned_run.run_id
+                for planned_run in first_plan.runs
+            ],
+            [
+                planned_run.run_id
+                for planned_run in second_plan.runs
+            ],
+        )
+
+    def test_run_plan_assigns_sequential_unique_ids(
+            self,
+    ) -> None:
+        config = self.build_small_matrix_config()
+
+        plan = build_run_plan(
+            config,
+            experiment_id="experiment-sequence",
+            generated_at_utc=(
+                "2026-08-22T12:00:00Z"
+            ),
+        )
+
+        self.assertEqual(plan.run_count, 64)
+        self.assertEqual(
+            [
+                planned_run.execution_order
+                for planned_run in plan.runs
+            ],
+            list(range(1, 65)),
+        )
+
+        run_ids = [
+            planned_run.run_id
+            for planned_run in plan.runs
+        ]
+
+        self.assertEqual(
+            len(run_ids),
+            len(set(run_ids)),
+        )
+        self.assertTrue(plan.randomized)
 
 
 if __name__ == "__main__":

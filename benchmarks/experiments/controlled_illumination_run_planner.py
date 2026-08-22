@@ -5,6 +5,7 @@ import math
 import csv
 import json
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 from typing import Any
@@ -12,7 +13,9 @@ from itertools import product
 from random import Random
 
 from benchmarks.experiments.controlled_illumination_metadata import (
+    ControlledIlluminationConfigError,
     ResolutionMetadata,
+    validate_controlled_illumination_config,
     validate_utc_timestamp,
 )
 
@@ -26,9 +29,32 @@ SUPPORTED_PHASES = {
     "constant_source",
 }
 
+PLAN_IDENTIFIER_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+)
+
+
 
 class ControlledIlluminationRunPlanError(ValueError):
     """Raised when an experiment run plan is invalid."""
+
+def require_safe_plan_identifier(
+    value: Any,
+    field_name: str,
+) -> str:
+    identifier = require_non_empty_plan_string(
+        value,
+        field_name,
+    )
+
+    if PLAN_IDENTIFIER_PATTERN.fullmatch(
+        identifier
+    ) is None:
+        raise ControlledIlluminationRunPlanError(
+            f"{field_name} contains unsafe characters."
+        )
+
+    return identifier
 
 
 def require_non_empty_plan_string(
@@ -173,14 +199,21 @@ class PlannedRun:
             "trial_number",
         )
 
-        for field_name in (
+        require_safe_plan_identifier(
+            self.experiment_id,
             "experiment_id",
+        )
+        require_safe_plan_identifier(
+            self.run_id,
             "run_id",
-            "phase",
-            "platform",
-            "architecture",
-            "algorithm",
-            "status",
+        )
+
+        for field_name in (
+                "phase",
+                "platform",
+                "architecture",
+                "algorithm",
+                "status",
         ):
             require_non_empty_plan_string(
                 getattr(self, field_name),
@@ -282,7 +315,7 @@ class ControlledIlluminationRunPlan:
                 str(error)
             ) from error
 
-        require_non_empty_plan_string(
+        require_safe_plan_identifier(
             self.experiment_id,
             "experiment_id",
         )
@@ -387,6 +420,15 @@ class ControlledIlluminationRunPlan:
 def build_run_conditions(
         config: dict[str, Any],
 ) -> tuple[RunCondition, ...]:
+    try:
+        validate_controlled_illumination_config(
+            config
+        )
+    except ControlledIlluminationConfigError as error:
+        raise ControlledIlluminationRunPlanError(
+            str(error)
+        ) from error
+
     matrix = config.get("experiment_matrix")
     execution = config.get("execution")
     phases = config.get("phases")
@@ -626,7 +668,7 @@ def build_run_plan(
     experiment_id: str,
     generated_at_utc: str,
 ) -> ControlledIlluminationRunPlan:
-    require_non_empty_plan_string(
+    require_safe_plan_identifier(
         experiment_id,
         "experiment_id",
     )

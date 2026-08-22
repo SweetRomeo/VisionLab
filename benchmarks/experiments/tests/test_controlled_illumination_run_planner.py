@@ -491,6 +491,23 @@ class ControlledIlluminationRunPlannerTests(
 
             self.assertEqual(temporary_files, [])
 
+    def test_unsafe_experiment_id_is_rejected(
+            self,
+    ) -> None:
+        config = self.build_small_matrix_config()
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunPlanError,
+                "unsafe characters",
+        ):
+            build_run_plan(
+                config,
+                experiment_id="../outside",
+                generated_at_utc=(
+                    "2026-08-22T12:00:00Z"
+                ),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

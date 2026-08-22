@@ -111,10 +111,27 @@ class PlannedRun:
     trial_number: int
     incidence_angle_degrees: float
     target_illuminance_lux: float | None
-    source_output_setting: str | float | None
+    source_output_setting: str | int | float | None
     target_fps: float
     frame_deadline_ms: float
     status: str = PLANNED_RUN_STATUS
+
+    @property
+    def condition_key(self) -> tuple[Any, ...]:
+        return (
+            self.phase,
+            self.platform,
+            self.architecture,
+            self.algorithm,
+            self.resolution.width,
+            self.resolution.height,
+            self.trial_number,
+            self.incidence_angle_degrees,
+            self.target_illuminance_lux,
+            self.source_output_setting,
+            self.target_fps,
+            self.frame_deadline_ms,
+        )
 
     def __post_init__(self) -> None:
         if not isinstance(
@@ -223,7 +240,11 @@ class ControlledIlluminationRunPlan:
     runs: tuple[PlannedRun, ...]
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
+        if (
+                isinstance(self.schema_version, bool)
+                or not isinstance(self.schema_version, int)
+                or self.schema_version != 1
+        ):
             raise ControlledIlluminationRunPlanError(
                 "schema_version must be 1."
             )
@@ -265,6 +286,13 @@ class ControlledIlluminationRunPlan:
             raise ControlledIlluminationRunPlanError(
                 "runs must be a non-empty tuple."
             )
+        if not all(
+                isinstance(planned_run, PlannedRun)
+                for planned_run in self.runs
+        ):
+            raise ControlledIlluminationRunPlanError(
+                "Every runs item must be PlannedRun."
+            )
 
         expected_orders = list(
             range(1, len(self.runs) + 1)
@@ -288,6 +316,19 @@ class ControlledIlluminationRunPlan:
         if len(run_ids) != len(set(run_ids)):
             raise ControlledIlluminationRunPlanError(
                 "Run IDs must be unique."
+            )
+
+        condition_keys = [
+            planned_run.condition_key
+            for planned_run in self.runs
+        ]
+
+        if len(condition_keys) != len(
+                set(condition_keys)
+        ):
+            raise ControlledIlluminationRunPlanError(
+                "Duplicate experimental conditions "
+                "are not allowed."
             )
 
         for planned_run in self.runs:

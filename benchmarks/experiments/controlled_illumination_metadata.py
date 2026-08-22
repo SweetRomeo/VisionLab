@@ -746,12 +746,14 @@ def validate_run_metadata(
             field_name,
         )
 
-    git_commit_sha = metadata.git_commit_sha.lower()
-
     if not isinstance(metadata.git_commit_sha, str):
         raise ControlledIlluminationMetadataError(
             "git_commit_sha must be a string."
         )
+
+    git_commit_sha = metadata.git_commit_sha.lower()
+
+
 
     if (
         len(git_commit_sha) != 40

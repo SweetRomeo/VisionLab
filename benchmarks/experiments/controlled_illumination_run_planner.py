@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
+import csv
+import json
+import os
+from pathlib import Path
+from uuid import uuid4
 from typing import Any
 from itertools import product
 from random import Random
@@ -11,6 +16,8 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     validate_utc_timestamp,
 )
 
+RUN_PLAN_JSON_FILE_NAME = "run_plan.json"
+RUN_PLAN_CSV_FILE_NAME = "run_plan.csv"
 
 PLANNED_RUN_STATUS = "planned"
 
@@ -720,3 +727,175 @@ def build_run_plan(
         randomization_seed=randomization_seed,
         runs=planned_runs,
     )
+
+def write_run_plan_manifests_atomic(
+    plan: ControlledIlluminationRunPlan,
+    output_directory: str | Path,
+) -> tuple[Path, Path]:
+    if not isinstance(
+        plan,
+        ControlledIlluminationRunPlan,
+    ):
+        raise ControlledIlluminationRunPlanError(
+            "plan must be ControlledIlluminationRunPlan."
+        )
+
+    output_path = Path(output_directory)
+    output_path.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    json_path = (
+        output_path / RUN_PLAN_JSON_FILE_NAME
+    )
+    csv_path = (
+        output_path / RUN_PLAN_CSV_FILE_NAME
+    )
+
+    json_temporary_path = json_path.with_name(
+        f".{json_path.name}.{uuid4().hex}.tmp"
+    )
+    csv_temporary_path = csv_path.with_name(
+        f".{csv_path.name}.{uuid4().hex}.tmp"
+    )
+
+    csv_fieldnames = [
+        "schema_version",
+        "generated_at_utc",
+        "randomized",
+        "randomization_seed",
+        "execution_order",
+        "experiment_id",
+        "run_id",
+        "status",
+        "phase",
+        "platform",
+        "architecture",
+        "algorithm",
+        "resolution_width",
+        "resolution_height",
+        "trial_number",
+        "incidence_angle_degrees",
+        "target_illuminance_lux",
+        "source_output_setting",
+        "target_fps",
+        "frame_deadline_ms",
+    ]
+
+    try:
+        with json_temporary_path.open(
+            "w",
+            encoding="utf-8",
+        ) as json_file:
+            json.dump(
+                plan.to_dict(),
+                json_file,
+                indent=2,
+                ensure_ascii=False,
+            )
+            json_file.write("\n")
+            json_file.flush()
+            os.fsync(json_file.fileno())
+
+        with csv_temporary_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as csv_file:
+            writer = csv.DictWriter(
+                csv_file,
+                fieldnames=csv_fieldnames,
+            )
+            writer.writeheader()
+
+            for planned_run in plan.runs:
+                writer.writerow(
+                    {
+                        "schema_version": (
+                            plan.schema_version
+                        ),
+                        "generated_at_utc": (
+                            plan.generated_at_utc
+                        ),
+                        "randomized": plan.randomized,
+                        "randomization_seed": (
+                            plan.randomization_seed
+                        ),
+                        "execution_order": (
+                            planned_run.execution_order
+                        ),
+                        "experiment_id": (
+                            planned_run.experiment_id
+                        ),
+                        "run_id": planned_run.run_id,
+                        "status": planned_run.status,
+                        "phase": planned_run.phase,
+                        "platform": (
+                            planned_run.platform
+                        ),
+                        "architecture": (
+                            planned_run.architecture
+                        ),
+                        "algorithm": (
+                            planned_run.algorithm
+                        ),
+                        "resolution_width": (
+                            planned_run.resolution.width
+                        ),
+                        "resolution_height": (
+                            planned_run.resolution.height
+                        ),
+                        "trial_number": (
+                            planned_run.trial_number
+                        ),
+                        "incidence_angle_degrees": (
+                            planned_run
+                            .incidence_angle_degrees
+                        ),
+                        "target_illuminance_lux": (
+                            planned_run
+                            .target_illuminance_lux
+                            if planned_run
+                            .target_illuminance_lux
+                            is not None
+                            else ""
+                        ),
+                        "source_output_setting": (
+                            planned_run
+                            .source_output_setting
+                            if planned_run
+                            .source_output_setting
+                            is not None
+                            else ""
+                        ),
+                        "target_fps": (
+                            planned_run.target_fps
+                        ),
+                        "frame_deadline_ms": (
+                            planned_run
+                            .frame_deadline_ms
+                        ),
+                    }
+                )
+
+            csv_file.flush()
+            os.fsync(csv_file.fileno())
+
+        os.replace(
+            json_temporary_path,
+            json_path,
+        )
+        os.replace(
+            csv_temporary_path,
+            csv_path,
+        )
+    finally:
+        json_temporary_path.unlink(
+            missing_ok=True,
+        )
+        csv_temporary_path.unlink(
+            missing_ok=True,
+        )
+
+    return json_path, csv_path

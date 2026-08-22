@@ -2,6 +2,8 @@ from dataclasses import replace
 import json
 from pathlib import Path
 import unittest
+import csv
+from tempfile import TemporaryDirectory
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -12,6 +14,7 @@ from benchmarks.experiments.controlled_illumination_run_planner import (
     PlannedRun,
     build_run_conditions,
     build_run_plan,
+    write_run_plan_manifests_atomic,
 )
 
 
@@ -415,6 +418,78 @@ class ControlledIlluminationRunPlannerTests(
             len(set(run_ids)),
         )
         self.assertTrue(plan.randomized)
+
+    def test_run_plan_manifests_are_written_atomically(
+            self,
+    ) -> None:
+        config = self.build_small_matrix_config()
+
+        plan = build_run_plan(
+            config,
+            experiment_id="experiment-manifest",
+            generated_at_utc=(
+                "2026-08-22T12:00:00Z"
+            ),
+        )
+
+        with TemporaryDirectory() as temporary_directory:
+            json_path, csv_path = (
+                write_run_plan_manifests_atomic(
+                    plan,
+                    temporary_directory,
+                )
+            )
+
+            self.assertTrue(json_path.is_file())
+            self.assertTrue(csv_path.is_file())
+            self.assertEqual(
+                json_path.name,
+                "run_plan.json",
+            )
+            self.assertEqual(
+                csv_path.name,
+                "run_plan.csv",
+            )
+
+            with json_path.open(
+                    "r",
+                    encoding="utf-8",
+            ) as json_file:
+                json_data = json.load(json_file)
+
+            self.assertEqual(
+                json_data["run_count"],
+                64,
+            )
+            self.assertEqual(
+                len(json_data["runs"]),
+                64,
+            )
+
+            with csv_path.open(
+                    "r",
+                    newline="",
+                    encoding="utf-8",
+            ) as csv_file:
+                csv_rows = list(
+                    csv.DictReader(csv_file)
+                )
+
+            self.assertEqual(len(csv_rows), 64)
+            self.assertEqual(
+                csv_rows[0]["run_id"],
+                plan.runs[0].run_id,
+            )
+
+            temporary_files = [
+                path
+                for path in Path(
+                    temporary_directory
+                ).iterdir()
+                if path.name.endswith(".tmp")
+            ]
+
+            self.assertEqual(temporary_files, [])
 
 
 if __name__ == "__main__":

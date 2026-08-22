@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import math
 from typing import Any
+from itertools import product
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -96,6 +97,20 @@ def validate_source_output_setting(
         "source_output_setting",
         non_negative=True,
     )
+
+@dataclass(frozen=True)
+class RunCondition:
+    phase: str
+    platform: str
+    architecture: str
+    algorithm: str
+    resolution: ResolutionMetadata
+    trial_number: int
+    incidence_angle_degrees: float
+    target_illuminance_lux: float | None
+    source_output_setting: str | int | float | None
+    target_fps: float
+    frame_deadline_ms: float
 
 
 @dataclass(frozen=True)
@@ -360,3 +375,239 @@ class ControlledIlluminationRunPlan:
                 for planned_run in self.runs
             ],
         }
+
+def build_run_conditions(
+        config: dict[str, Any],
+) -> tuple[RunCondition, ...]:
+    matrix = config.get("experiment_matrix")
+    execution = config.get("execution")
+    phases = config.get("phases")
+
+    if not isinstance(matrix, dict):
+        raise ControlledIlluminationRunPlanError(
+            "experiment_matrix must be an object."
+        )
+
+    if not isinstance(execution, dict):
+        raise ControlledIlluminationRunPlanError(
+            "execution must be an object."
+        )
+
+    if not isinstance(phases, list) or not phases:
+        raise ControlledIlluminationRunPlanError(
+            "phases must be a non-empty list."
+        )
+
+    phase_names = []
+
+    for phase in phases:
+        if not isinstance(phase, dict):
+            raise ControlledIlluminationRunPlanError(
+                "Every phase must be an object."
+            )
+
+        phase_name = require_non_empty_plan_string(
+            phase.get("name"),
+            "phases.name",
+        )
+
+        if phase_name not in SUPPORTED_PHASES:
+            raise ControlledIlluminationRunPlanError(
+                f"Unsupported phase: {phase_name}"
+            )
+
+        phase_names.append(phase_name)
+
+    if len(phase_names) != len(set(phase_names)):
+        raise ControlledIlluminationRunPlanError(
+            "Phase names must be unique."
+        )
+
+    target_fps = require_finite_plan_number(
+        execution.get("target_fps"),
+        "execution.target_fps",
+        positive=True,
+    )
+    deadline_multiplier = require_finite_plan_number(
+        execution.get("deadline_multiplier"),
+        "execution.deadline_multiplier",
+        positive=True,
+    )
+    frame_deadline_ms = (
+                                1000.0 / target_fps
+                        ) * deadline_multiplier
+
+    trial_count = require_positive_plan_integer(
+        matrix.get("trial_count"),
+        "experiment_matrix.trial_count",
+    )
+
+    platforms = matrix.get("platforms")
+    architectures = matrix.get("architectures")
+    algorithms = matrix.get("algorithms")
+    resolutions_data = matrix.get("resolutions")
+    angles = matrix.get("incidence_angles_degrees")
+    illuminance_levels = matrix.get(
+        "target_illuminance_levels_lux"
+    )
+
+    named_lists = {
+        "platforms": platforms,
+        "architectures": architectures,
+        "algorithms": algorithms,
+    }
+
+    for field_name, values in named_lists.items():
+        if not isinstance(values, list) or not values:
+            raise ControlledIlluminationRunPlanError(
+                f"experiment_matrix.{field_name} "
+                "must be a non-empty list."
+            )
+
+        for value in values:
+            require_non_empty_plan_string(
+                value,
+                f"experiment_matrix.{field_name}",
+            )
+
+    if (
+            not isinstance(resolutions_data, list)
+            or not resolutions_data
+    ):
+        raise ControlledIlluminationRunPlanError(
+            "experiment_matrix.resolutions must be "
+            "a non-empty list."
+        )
+
+    resolutions = []
+
+    for resolution_data in resolutions_data:
+        if not isinstance(resolution_data, dict):
+            raise ControlledIlluminationRunPlanError(
+                "Every resolution must be an object."
+            )
+
+        width = require_positive_plan_integer(
+            resolution_data.get("width"),
+            "resolution.width",
+        )
+        height = require_positive_plan_integer(
+            resolution_data.get("height"),
+            "resolution.height",
+        )
+
+        resolutions.append(
+            ResolutionMetadata(
+                width=width,
+                height=height,
+            )
+        )
+
+    if not isinstance(angles, list) or not angles:
+        raise ControlledIlluminationRunPlanError(
+            "incidence_angles_degrees must be "
+            "a non-empty list."
+        )
+
+    validated_angles = [
+        require_finite_plan_number(
+            angle,
+            "incidence_angle_degrees",
+            non_negative=True,
+        )
+        for angle in angles
+    ]
+
+    validated_illuminance_levels = []
+
+    if "constant_lux" in phase_names:
+        if (
+                not isinstance(illuminance_levels, list)
+                or not illuminance_levels
+        ):
+            raise ControlledIlluminationRunPlanError(
+                "constant_lux requires "
+                "target_illuminance_levels_lux."
+            )
+
+        validated_illuminance_levels = [
+            require_finite_plan_number(
+                level,
+                "target_illuminance_levels_lux",
+                positive=True,
+            )
+            for level in illuminance_levels
+        ]
+
+    source_output_settings = matrix.get(
+        "source_output_settings"
+    )
+
+    if "constant_source" in phase_names:
+        if (
+                not isinstance(source_output_settings, list)
+                or not source_output_settings
+        ):
+            raise ControlledIlluminationRunPlanError(
+                "constant_source requires non-empty "
+                "experiment_matrix.source_output_settings."
+            )
+
+        for setting in source_output_settings:
+            validate_source_output_setting(setting)
+
+    conditions: list[RunCondition] = []
+
+    for phase_name in phase_names:
+        control_values = (
+            validated_illuminance_levels
+            if phase_name == "constant_lux"
+            else source_output_settings
+        )
+
+        for (
+                platform,
+                architecture,
+                algorithm,
+                resolution,
+                incidence_angle,
+                control_value,
+                trial_number,
+        ) in product(
+            platforms,
+            architectures,
+            algorithms,
+            resolutions,
+            validated_angles,
+            control_values,
+            range(1, trial_count + 1),
+        ):
+            conditions.append(
+                RunCondition(
+                    phase=phase_name,
+                    platform=platform,
+                    architecture=architecture,
+                    algorithm=algorithm,
+                    resolution=resolution,
+                    trial_number=trial_number,
+                    incidence_angle_degrees=(
+                        incidence_angle
+                    ),
+                    target_illuminance_lux=(
+                        control_value
+                        if phase_name == "constant_lux"
+                        else None
+                    ),
+                    source_output_setting=(
+                        control_value
+                        if phase_name == "constant_source"
+                        else None
+                    ),
+                    target_fps=target_fps,
+                    frame_deadline_ms=(
+                        frame_deadline_ms
+                    ),
+                )
+            )
+
+    return tuple(conditions)

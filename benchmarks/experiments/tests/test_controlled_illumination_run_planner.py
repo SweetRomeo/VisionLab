@@ -1,4 +1,6 @@
 from dataclasses import replace
+import json
+from pathlib import Path
 import unittest
 
 from benchmarks.experiments.controlled_illumination_metadata import (
@@ -8,6 +10,7 @@ from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlan,
     ControlledIlluminationRunPlanError,
     PlannedRun,
+    build_run_conditions,
 )
 
 
@@ -160,6 +163,7 @@ class ControlledIlluminationRunPlannerTests(
             execution_order=2,
             experiment_id="another-experiment",
             run_id="run-2",
+            trial_number=2,
         )
 
         with self.assertRaises(
@@ -192,6 +196,110 @@ class ControlledIlluminationRunPlannerTests(
             replace(
                 self.base_run,
                 resolution="640x480",  # type: ignore[arg-type]
+            )
+
+    def load_experiment_config(self) -> dict:
+        config_path = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / "controlled_illumination_config.json"
+        )
+
+        with config_path.open(
+                "r",
+                encoding="utf-8",
+        ) as config_file:
+            return json.load(config_file)
+
+    def test_constant_source_requires_output_settings(
+            self,
+    ) -> None:
+        config = self.load_experiment_config()
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunPlanError,
+                "source_output_settings",
+        ):
+            build_run_conditions(config)
+
+    def test_complete_experiment_matrix_is_expanded(
+            self,
+    ) -> None:
+        config = self.load_experiment_config()
+
+        source_output_settings = [25, 50]
+        config["experiment_matrix"][
+            "source_output_settings"
+        ] = source_output_settings
+
+        conditions = build_run_conditions(config)
+        matrix = config["experiment_matrix"]
+
+        common_condition_count = (
+                len(matrix["platforms"])
+                * len(matrix["architectures"])
+                * len(matrix["algorithms"])
+                * len(matrix["resolutions"])
+                * len(matrix["incidence_angles_degrees"])
+                * matrix["trial_count"]
+        )
+
+        expected_constant_lux_count = (
+                common_condition_count
+                * len(
+            matrix[
+                "target_illuminance_levels_lux"
+            ]
+        )
+        )
+        expected_constant_source_count = (
+                common_condition_count
+                * len(source_output_settings)
+        )
+
+        constant_lux_count = sum(
+            condition.phase == "constant_lux"
+            for condition in conditions
+        )
+        constant_source_count = sum(
+            condition.phase == "constant_source"
+            for condition in conditions
+        )
+
+        self.assertEqual(
+            constant_lux_count,
+            expected_constant_lux_count,
+        )
+        self.assertEqual(
+            constant_source_count,
+            expected_constant_source_count,
+        )
+        self.assertEqual(
+            len(conditions),
+            (
+                    expected_constant_lux_count
+                    + expected_constant_source_count
+            ),
+        )
+
+    def test_duplicate_conditions_are_rejected(
+            self,
+    ) -> None:
+        duplicate_condition = replace(
+            self.base_run,
+            execution_order=2,
+            run_id="run-2",
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunPlanError,
+                "Duplicate experimental conditions",
+        ):
+            self.build_plan(
+                (
+                    self.base_run,
+                    duplicate_condition,
+                )
             )
 
 

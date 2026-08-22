@@ -720,6 +720,10 @@ def validate_run_metadata(
         "run_id",
     )
     validate_utc_timestamp(
+        metadata.collected_at_utc,
+        "collected_at_utc",
+    )
+    validate_utc_timestamp(
         metadata.measured_illuminance.measured_at_utc,
         "measured_illuminance.measured_at_utc",
     )
@@ -743,6 +747,11 @@ def validate_run_metadata(
         )
 
     git_commit_sha = metadata.git_commit_sha.lower()
+
+    if not isinstance(metadata.git_commit_sha, str):
+        raise ControlledIlluminationMetadataError(
+            "git_commit_sha must be a string."
+        )
 
     if (
         len(git_commit_sha) != 40

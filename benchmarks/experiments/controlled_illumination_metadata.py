@@ -703,7 +703,7 @@ def validate_safe_identifier(
         raise ControlledIlluminationMetadataError(
             f"{field_name} contains invalid path characters."
         )
-    
+
 def require_finite_metadata_number(
     value: Any,
     field_name: str,
@@ -935,7 +935,7 @@ def validate_run_metadata(
         metadata.frame_deadline_ms,
         "frame_deadline_ms",
     )
-    
+
     if not math.isclose(
         frame_deadline_ms,
         expected_deadline_ms,

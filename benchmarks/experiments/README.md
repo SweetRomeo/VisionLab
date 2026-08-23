@@ -20,6 +20,10 @@ The infrastructure in this directory does not perform the physical experiment au
 | `validate_controlled_illumination_metadata.py`            | Validates one or more saved run metadata files.                                                                  |
 | `tests/test_controlled_illumination_metadata.py`          | Tests configuration, measurement, metadata and storage behavior.                                                 |
 | `tests/test_validate_controlled_illumination_metadata.py` | Tests the metadata-validation CLI.                                                                               |
+| `controlled_illumination_run_planner.py` | Expands, validates, randomizes and serializes the experiment run plan. |
+| `generate_controlled_illumination_run_plan.py` | Provides dry-run validation and JSON/CSV manifest generation through the CLI. |
+| `tests/test_controlled_illumination_run_planner.py` | Tests matrix expansion, duplicate rejection, deterministic ordering and atomic manifests. |
+| `tests/test_generate_controlled_illumination_run_plan.py` | Tests run-planner CLI dry-run and manifest-generation behavior. |
 
 ## Experiment phases
 
@@ -292,3 +296,92 @@ Official results must not be used when metadata validation fails.
 The current infrastructure supports configuration and metadata preparation on the desktop reference platform.
 
 Physical measurements, Raspberry Pi deployment, NVIDIA Jetson deployment, hardware-specific acceleration and final architecture selection remain separate future stages.
+
+## Controlled-illumination run planning
+
+The controlled-illumination run planner expands the experiment
+configuration into an ordered and reproducible execution manifest.
+
+The planner:
+
+- Expands the complete experimental matrix.
+- Supports `constant_lux` and `constant_source` phases.
+- Randomizes execution order using the configured deterministic seed.
+- Assigns sequential execution numbers and unique run identifiers.
+- Rejects duplicate experimental conditions.
+- Writes each JSON and CSV manifest using atomic file replacement.
+
+### Constant-source configuration
+
+The `constant_source` phase requires explicit source-output settings
+under `experiment_matrix`:
+
+```json
+"source_output_settings": [
+  "device_setting_low",
+  "device_setting_medium",
+  "device_setting_high"
+]
+```
+
+These values must represent real, reproducible controls supported by
+the selected illumination device. Do not add placeholder values to
+official experiment configurations.
+
+Until these settings are defined, the planner intentionally rejects
+the configuration instead of inventing hardware-specific values.
+
+Both dry-run validation and manifest generation will fail until
+`source_output_settings` contains the real settings supported by the
+selected illumination device.
+
+### Validate the plan without writing files
+
+After configuring the real source-output settings, run from the
+repository root:
+
+```bash
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--experiment-id controlled-illumination-pilot \
+--dry-run
+```
+
+A dry run expands, randomizes and validates the complete execution
+plan without writing manifest files.
+
+### Generate manifests
+
+After the source-output settings have been measured and added to the
+configuration, generate the manifests with:
+
+```bash
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--experiment-id controlled-illumination-pilot
+```
+
+By default, manifests are written under:
+
+```text
+benchmarks/results/controlled_illumination/<experiment-id>/
+```
+
+The generated files are:
+
+```text
+run_plan.json
+run_plan.csv
+```
+
+An alternative output directory can be selected with:
+
+```bash
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--experiment-id controlled-illumination-pilot \
+--output-directory path/to/output
+```
+
+Generated run plans are experimental outputs and must not be committed
+to the repository.

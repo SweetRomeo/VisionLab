@@ -8,9 +8,18 @@ from pathlib import Path
 import subprocess
 from types import MappingProxyType
 from typing import TypeAlias
+from dataclasses import replace
 
 from benchmarks.experiments.controlled_illumination_run_planner import (
+    ControlledIlluminationRunPlan,
     PlannedRun,
+)
+
+from benchmarks.experiments.controlled_illumination_run_state import (
+    ControlledIlluminationProgress,
+    RunStatus,
+    transition_progress_run,
+    validate_progress_matches_plan,
 )
 
 
@@ -21,6 +30,16 @@ SUPPORTED_EXECUTION_ARCHITECTURES = frozenset(
         "pure_cpp",
     }
 )
+
+TimestampProvider: TypeAlias = Callable[
+    [],
+    str,
+]
+
+ProgressPersistenceCallback: TypeAlias = Callable[
+    [ControlledIlluminationProgress],
+    object,
+]
 
 
 class ControlledIlluminationExecutionError(
@@ -223,6 +242,203 @@ class ArchitectureRunnerRegistry:
                 "Unsupported execution architecture: "
                 f"{architecture}"
             ) from error
+
+@dataclass(frozen=True)
+class OrchestratedRunOutcome:
+    planned_run: PlannedRun
+    execution_result: RunnerExecutionResult
+    progress: ControlledIlluminationProgress
+
+    @property
+    def succeeded(self) -> bool:
+        return self.execution_result.succeeded
+
+
+def select_next_planned_run(
+    plan: ControlledIlluminationRunPlan,
+    progress: ControlledIlluminationProgress,
+) -> PlannedRun | None:
+    if not isinstance(
+        plan,
+        ControlledIlluminationRunPlan,
+    ):
+        raise ControlledIlluminationExecutionError(
+            "plan must be ControlledIlluminationRunPlan."
+        )
+
+    if not isinstance(
+        progress,
+        ControlledIlluminationProgress,
+    ):
+        raise ControlledIlluminationExecutionError(
+            "progress must be "
+            "ControlledIlluminationProgress."
+        )
+
+    validate_progress_matches_plan(
+        progress,
+        plan,
+    )
+
+    for planned_run in plan.runs:
+        run_state = progress.get_run_state(
+            planned_run.run_id
+        )
+
+        if run_state.status == RunStatus.PLANNED:
+            return planned_run
+
+    return None
+
+
+def build_runner_failure_reason(
+    execution_result: RunnerExecutionResult,
+) -> str:
+    reason = (
+        execution_result.standard_error.strip()
+        or execution_result.standard_output.strip()
+    )
+
+    exit_description = (
+        "Architecture runner exited with code "
+        f"{execution_result.exit_code}."
+    )
+
+    if not reason:
+        return exit_description
+
+    return (
+        f"{exit_description} "
+        f"Runner output: {reason}"
+    )
+
+
+def execute_next_planned_run(
+    plan: ControlledIlluminationRunPlan,
+    progress: ControlledIlluminationProgress,
+    runner_registry: ArchitectureRunnerRegistry,
+    *,
+    timestamp_provider: TimestampProvider,
+    persist_progress: ProgressPersistenceCallback,
+) -> OrchestratedRunOutcome | None:
+    if not isinstance(
+        runner_registry,
+        ArchitectureRunnerRegistry,
+    ):
+        raise ControlledIlluminationExecutionError(
+            "runner_registry must be "
+            "ArchitectureRunnerRegistry."
+        )
+
+    if not callable(timestamp_provider):
+        raise ControlledIlluminationExecutionError(
+            "timestamp_provider must be callable."
+        )
+
+    if not callable(persist_progress):
+        raise ControlledIlluminationExecutionError(
+            "persist_progress must be callable."
+        )
+
+    planned_run = select_next_planned_run(
+        plan,
+        progress,
+    )
+
+    if planned_run is None:
+        return None
+
+    running_progress = transition_progress_run(
+        progress,
+        planned_run.run_id,
+        RunStatus.RUNNING,
+        timestamp_provider(),
+    )
+
+    persist_progress(
+        running_progress
+    )
+
+    runner = runner_registry.get_runner(
+        planned_run.architecture
+    )
+
+    try:
+        execution_result = runner(
+            planned_run
+        )
+    except Exception as error:
+        failure_reason = (
+            str(error).strip()
+            or error.__class__.__name__
+        )
+
+        failed_progress = transition_progress_run(
+            running_progress,
+            planned_run.run_id,
+            RunStatus.FAILED,
+            timestamp_provider(),
+            reason=failure_reason,
+        )
+
+        persist_progress(
+            failed_progress
+        )
+
+        raise
+
+    if not isinstance(
+        execution_result,
+        RunnerExecutionResult,
+    ):
+        invalid_result_error = (
+            ControlledIlluminationExecutionError(
+                "Architecture runner must return "
+                "RunnerExecutionResult."
+            )
+        )
+
+        failed_progress = transition_progress_run(
+            running_progress,
+            planned_run.run_id,
+            RunStatus.FAILED,
+            timestamp_provider(),
+            reason=str(invalid_result_error),
+        )
+
+        persist_progress(
+            failed_progress
+        )
+
+        raise invalid_result_error
+
+    if execution_result.succeeded:
+        final_progress = transition_progress_run(
+            running_progress,
+            planned_run.run_id,
+            RunStatus.COMPLETED,
+            timestamp_provider(),
+        )
+    else:
+        final_progress = transition_progress_run(
+            running_progress,
+            planned_run.run_id,
+            RunStatus.FAILED,
+            timestamp_provider(),
+            reason=build_runner_failure_reason(
+                execution_result
+            ),
+        )
+
+    persist_progress(
+        final_progress
+    )
+
+    return OrchestratedRunOutcome(
+        planned_run=planned_run,
+        execution_result=execution_result,
+        progress=final_progress,
+    )
 
 class SubprocessArchitectureRunner:
     def __init__(

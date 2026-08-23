@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import subprocess
 import unittest
@@ -11,12 +12,20 @@ from benchmarks.experiments.controlled_illumination_executor import (
     RunnerCommand,
     RunnerExecutionResult,
     SubprocessArchitectureRunner,
+    execute_next_planned_run,
+    select_next_planned_run,
 )
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
+    ControlledIlluminationRunPlan,
     PlannedRun,
+)
+from benchmarks.experiments.controlled_illumination_run_state import (
+    RunStatus,
+    initialize_run_progress,
+    transition_progress_run,
 )
 
 
@@ -43,6 +52,32 @@ class ControlledIlluminationExecutorTests(
             source_output_setting=None,
             target_fps=30.0,
             frame_deadline_ms=1000.0 / 30.0,
+        )
+
+    def build_run_plan(
+        self,
+    ) -> ControlledIlluminationRunPlan:
+        first_run = self.build_planned_run()
+
+        second_run = replace(
+            first_run,
+            execution_order=2,
+            run_id="experiment-executor-run-0002",
+            trial_number=2,
+        )
+
+        return ControlledIlluminationRunPlan(
+            schema_version=1,
+            generated_at_utc=(
+                "2026-08-24T09:00:00Z"
+            ),
+            experiment_id="experiment-executor",
+            randomized=False,
+            randomization_seed=20260824,
+            runs=(
+                first_run,
+                second_run,
+            ),
         )
 
     @staticmethod
@@ -294,6 +329,258 @@ class ControlledIlluminationExecutorTests(
             runner(
                 self.build_planned_run()
             )
+
+    def test_selects_first_planned_run(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+
+        selected_run = select_next_planned_run(
+            plan,
+            progress,
+        )
+
+        self.assertIsNotNone(selected_run)
+        self.assertEqual(
+            selected_run.run_id,
+            "experiment-executor-run-0001",
+        )
+
+    def test_selects_next_run_after_completion(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+
+        progress = transition_progress_run(
+            progress,
+            plan.runs[0].run_id,
+            RunStatus.RUNNING,
+            "2026-08-24T09:02:00Z",
+        )
+        progress = transition_progress_run(
+            progress,
+            plan.runs[0].run_id,
+            RunStatus.COMPLETED,
+            "2026-08-24T09:03:00Z",
+        )
+
+        selected_run = select_next_planned_run(
+            plan,
+            progress,
+        )
+
+        self.assertIsNotNone(selected_run)
+        self.assertEqual(
+            selected_run.run_id,
+            "experiment-executor-run-0002",
+        )
+
+    def test_returns_none_when_no_runs_remain(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+        transition_timestamps = (
+            (
+                "2026-08-24T09:02:00Z",
+                "2026-08-24T09:03:00Z",
+            ),
+            (
+                "2026-08-24T09:04:00Z",
+                "2026-08-24T09:05:00Z",
+            ),
+        )
+
+        for planned_run, timestamps in zip(
+            plan.runs,
+            transition_timestamps,
+            strict=True,
+        ):
+            started_at_utc, finished_at_utc = (
+                timestamps
+            )
+            progress = transition_progress_run(
+                progress,
+                planned_run.run_id,
+                RunStatus.RUNNING,
+                started_at_utc,
+            )
+            progress = transition_progress_run(
+                progress,
+                planned_run.run_id,
+                RunStatus.COMPLETED,
+                finished_at_utc,
+            )
+
+        self.assertIsNone(
+            select_next_planned_run(
+                plan,
+                progress,
+            )
+        )
+
+    def test_successful_execution_completes_run(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+        saved_progress = []
+        timestamps = iter(
+            (
+                "2026-08-24T09:02:00Z",
+                "2026-08-24T09:03:00Z",
+            )
+        )
+
+        outcome = execute_next_planned_run(
+            plan,
+            progress,
+            ArchitectureRunnerRegistry(
+                self.build_runners()
+            ),
+            timestamp_provider=lambda: next(
+                timestamps
+            ),
+            persist_progress=saved_progress.append,
+        )
+
+        self.assertIsNotNone(outcome)
+        self.assertTrue(outcome.succeeded)
+        self.assertEqual(
+            len(saved_progress),
+            2,
+        )
+        self.assertEqual(
+            saved_progress[0].get_run_state(
+                plan.runs[0].run_id
+            ).status,
+            RunStatus.RUNNING,
+        )
+        self.assertEqual(
+            outcome.progress.get_run_state(
+                plan.runs[0].run_id
+            ).status,
+            RunStatus.COMPLETED,
+        )
+
+    def test_failed_result_marks_run_failed(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+        runners = self.build_runners()
+        runners["pure_python"] = (
+            lambda planned_run: RunnerExecutionResult(
+                exit_code=5,
+                standard_error="runner failed",
+            )
+        )
+        saved_progress = []
+        timestamps = iter(
+            (
+                "2026-08-24T09:02:00Z",
+                "2026-08-24T09:03:00Z",
+            )
+        )
+
+        outcome = execute_next_planned_run(
+            plan,
+            progress,
+            ArchitectureRunnerRegistry(runners),
+            timestamp_provider=lambda: next(
+                timestamps
+            ),
+            persist_progress=saved_progress.append,
+        )
+
+        self.assertIsNotNone(outcome)
+        final_state = outcome.progress.get_run_state(
+            plan.runs[0].run_id
+        )
+
+        self.assertFalse(outcome.succeeded)
+        self.assertEqual(
+            final_state.status,
+            RunStatus.FAILED,
+        )
+        self.assertIn(
+            "runner failed",
+            final_state.failure_reason,
+        )
+        self.assertEqual(
+            len(saved_progress),
+            2,
+        )
+
+    def test_runner_exception_marks_run_failed(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+
+        def failing_runner(
+            planned_run,
+        ) -> RunnerExecutionResult:
+            raise RuntimeError(
+                "runner exploded"
+            )
+
+        runners = self.build_runners()
+        runners["pure_python"] = failing_runner
+        saved_progress = []
+        timestamps = iter(
+            (
+                "2026-08-24T09:02:00Z",
+                "2026-08-24T09:03:00Z",
+            )
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "runner exploded",
+        ):
+            execute_next_planned_run(
+                plan,
+                progress,
+                ArchitectureRunnerRegistry(runners),
+                timestamp_provider=lambda: next(
+                    timestamps
+                ),
+                persist_progress=saved_progress.append,
+            )
+
+        failed_state = saved_progress[-1].get_run_state(
+            plan.runs[0].run_id
+        )
+
+        self.assertEqual(
+            failed_state.status,
+            RunStatus.FAILED,
+        )
+        self.assertEqual(
+            failed_state.failure_reason,
+            "runner exploded",
+        )
 
 
 if __name__ == "__main__":

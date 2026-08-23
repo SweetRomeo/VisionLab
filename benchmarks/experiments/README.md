@@ -309,7 +309,7 @@ The planner:
 - Randomizes execution order using the configured deterministic seed.
 - Assigns sequential execution numbers and unique run identifiers.
 - Rejects duplicate experimental conditions.
-- Writes JSON and CSV manifests atomically.
+- Writes each JSON and CSV manifest using atomic file replacement.
 
 ### Constant-source configuration
 

@@ -941,3 +941,217 @@ def write_run_plan_manifests_atomic(
         )
 
     return json_path, csv_path
+
+def require_plan_mapping(
+    value: Any,
+    field_name: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ControlledIlluminationRunPlanError(
+            f"{field_name} must be an object."
+        )
+
+    return value
+
+
+def require_exact_plan_fields(
+    value: dict[str, Any],
+    required_fields: set[str],
+    field_name: str,
+) -> None:
+    actual_fields = set(value)
+
+    missing_fields = required_fields - actual_fields
+    unexpected_fields = actual_fields - required_fields
+
+    if missing_fields:
+        raise ControlledIlluminationRunPlanError(
+            f"Missing {field_name} fields: "
+            f"{sorted(missing_fields)}"
+        )
+
+    if unexpected_fields:
+        raise ControlledIlluminationRunPlanError(
+            f"Unexpected {field_name} fields: "
+            f"{sorted(unexpected_fields)}"
+        )
+
+
+def planned_run_from_dict(
+    value: Any,
+) -> PlannedRun:
+    run_data = require_plan_mapping(
+        value,
+        "planned run",
+    )
+
+    required_fields = {
+        "execution_order",
+        "experiment_id",
+        "run_id",
+        "phase",
+        "platform",
+        "architecture",
+        "algorithm",
+        "resolution",
+        "trial_number",
+        "incidence_angle_degrees",
+        "target_illuminance_lux",
+        "source_output_setting",
+        "target_fps",
+        "frame_deadline_ms",
+        "status",
+    }
+
+    require_exact_plan_fields(
+        run_data,
+        required_fields,
+        "planned run",
+    )
+
+    resolution_data = require_plan_mapping(
+        run_data["resolution"],
+        "planned run resolution",
+    )
+
+    require_exact_plan_fields(
+        resolution_data,
+        {
+            "width",
+            "height",
+        },
+        "planned run resolution",
+    )
+
+    resolution = ResolutionMetadata(
+        width=resolution_data["width"],
+        height=resolution_data["height"],
+    )
+
+    return PlannedRun(
+        execution_order=run_data[
+            "execution_order"
+        ],
+        experiment_id=run_data[
+            "experiment_id"
+        ],
+        run_id=run_data["run_id"],
+        phase=run_data["phase"],
+        platform=run_data["platform"],
+        architecture=run_data["architecture"],
+        algorithm=run_data["algorithm"],
+        resolution=resolution,
+        trial_number=run_data["trial_number"],
+        incidence_angle_degrees=run_data[
+            "incidence_angle_degrees"
+        ],
+        target_illuminance_lux=run_data[
+            "target_illuminance_lux"
+        ],
+        source_output_setting=run_data[
+            "source_output_setting"
+        ],
+        target_fps=run_data["target_fps"],
+        frame_deadline_ms=run_data[
+            "frame_deadline_ms"
+        ],
+        status=run_data["status"],
+    )
+
+
+def run_plan_from_dict(
+    value: Any,
+) -> ControlledIlluminationRunPlan:
+    plan_data = require_plan_mapping(
+        value,
+        "run plan",
+    )
+
+    required_fields = {
+        "schema_version",
+        "generated_at_utc",
+        "experiment_id",
+        "randomized",
+        "randomization_seed",
+        "run_count",
+        "runs",
+    }
+
+    require_exact_plan_fields(
+        plan_data,
+        required_fields,
+        "run plan",
+    )
+
+    runs_data = plan_data["runs"]
+
+    if not isinstance(runs_data, list) or not runs_data:
+        raise ControlledIlluminationRunPlanError(
+            "run plan runs must be a non-empty list."
+        )
+
+    plan = ControlledIlluminationRunPlan(
+        schema_version=plan_data[
+            "schema_version"
+        ],
+        generated_at_utc=plan_data[
+            "generated_at_utc"
+        ],
+        experiment_id=plan_data[
+            "experiment_id"
+        ],
+        randomized=plan_data["randomized"],
+        randomization_seed=plan_data[
+            "randomization_seed"
+        ],
+        runs=tuple(
+            planned_run_from_dict(run_data)
+            for run_data in runs_data
+        ),
+    )
+
+    stored_run_count = plan_data["run_count"]
+
+    if (
+        isinstance(stored_run_count, bool)
+        or not isinstance(stored_run_count, int)
+        or stored_run_count != plan.run_count
+    ):
+        raise ControlledIlluminationRunPlanError(
+            "Stored run_count does not match runs."
+        )
+
+    return plan
+
+
+def load_run_plan_manifest(
+    input_path: str | Path,
+) -> ControlledIlluminationRunPlan:
+    manifest_path = Path(input_path)
+
+    if not manifest_path.is_file():
+        raise ControlledIlluminationRunPlanError(
+            "Run-plan manifest was not found: "
+            f"{manifest_path}"
+        )
+
+    try:
+        with manifest_path.open(
+            "r",
+            encoding="utf-8",
+        ) as manifest_file:
+            manifest_data = json.load(
+                manifest_file
+            )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
+        raise ControlledIlluminationRunPlanError(
+            "Run-plan manifest could not be loaded: "
+            f"{manifest_path}: {error}"
+        ) from error
+
+    return run_plan_from_dict(
+        manifest_data
+    )

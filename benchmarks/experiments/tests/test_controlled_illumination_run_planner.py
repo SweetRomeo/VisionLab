@@ -15,6 +15,9 @@ from benchmarks.experiments.controlled_illumination_run_planner import (
     build_run_conditions,
     build_run_plan,
     write_run_plan_manifests_atomic,
+    load_run_plan_manifest,
+    planned_run_from_dict,
+    run_plan_from_dict,
 )
 
 
@@ -508,6 +511,114 @@ class ControlledIlluminationRunPlannerTests(
                 ),
             )
 
+    def test_planned_run_round_trip(
+        self,
+    ) -> None:
+        plan = build_run_plan(
+            self.build_small_matrix_config(),
+            experiment_id="experiment-load",
+            generated_at_utc=(
+                "2026-08-23T09:00:00Z"
+            ),
+        )
+
+        original_run = plan.runs[0]
+        loaded_run = planned_run_from_dict(
+            original_run.to_dict()
+        )
+
+        self.assertEqual(
+            loaded_run.to_dict(),
+            original_run.to_dict(),
+        )
+
+    def test_run_plan_round_trip(
+        self,
+    ) -> None:
+        plan = build_run_plan(
+            self.build_small_matrix_config(),
+            experiment_id="experiment-load",
+            generated_at_utc=(
+                "2026-08-23T09:00:00Z"
+            ),
+        )
+
+        loaded_plan = run_plan_from_dict(
+            plan.to_dict()
+        )
+
+        self.assertEqual(
+            loaded_plan.to_dict(),
+            plan.to_dict(),
+        )
+
+    def test_written_manifest_can_be_loaded(
+        self,
+    ) -> None:
+        plan = build_run_plan(
+            self.build_small_matrix_config(),
+            experiment_id="experiment-load",
+            generated_at_utc=(
+                "2026-08-23T09:00:00Z"
+            ),
+        )
+
+        with TemporaryDirectory() as temporary:
+            json_path, _ = (
+                write_run_plan_manifests_atomic(
+                    plan,
+                    temporary,
+                )
+            )
+            loaded_plan = load_run_plan_manifest(
+                json_path
+            )
+
+        self.assertEqual(
+            loaded_plan.to_dict(),
+            plan.to_dict(),
+        )
+
+    def test_modified_manifest_run_count_is_rejected(
+        self,
+    ) -> None:
+        plan = build_run_plan(
+            self.build_small_matrix_config(),
+            experiment_id="experiment-load",
+            generated_at_utc=(
+                "2026-08-23T09:00:00Z"
+            ),
+        )
+        plan_data = plan.to_dict()
+        plan_data["run_count"] = 999
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunPlanError,
+            "run_count",
+        ):
+            run_plan_from_dict(
+                plan_data
+            )
+
+    def test_invalid_manifest_json_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            manifest_path = (
+                Path(temporary) / "run_plan.json"
+            )
+            manifest_path.write_text(
+                "{invalid-json",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunPlanError,
+                "could not be loaded",
+            ):
+                load_run_plan_manifest(
+                    manifest_path
+                )
 
 if __name__ == "__main__":
     unittest.main()

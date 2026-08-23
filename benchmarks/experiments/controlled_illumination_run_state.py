@@ -6,6 +6,9 @@ from typing import Any
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import os
+from pathlib import Path
+from uuid import uuid4
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     validate_utc_timestamp,
@@ -704,3 +707,322 @@ def transition_progress_run(
         updated_at_utc=transitioned_at_utc,
         runs=updated_runs,
     )
+
+def require_state_mapping(
+    value: Any,
+    field_name: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ControlledIlluminationRunStateError(
+            f"{field_name} must be an object."
+        )
+
+    return value
+
+
+def require_exact_state_fields(
+    value: dict[str, Any],
+    required_fields: set[str],
+    field_name: str,
+) -> None:
+    actual_fields = set(value)
+
+    missing_fields = required_fields - actual_fields
+    unexpected_fields = actual_fields - required_fields
+
+    if missing_fields:
+        raise ControlledIlluminationRunStateError(
+            f"Missing {field_name} fields: "
+            f"{sorted(missing_fields)}"
+        )
+
+    if unexpected_fields:
+        raise ControlledIlluminationRunStateError(
+            f"Unexpected {field_name} fields: "
+            f"{sorted(unexpected_fields)}"
+        )
+
+
+def run_state_from_dict(
+    value: Any,
+) -> RunState:
+    state_data = require_state_mapping(
+        value,
+        "run state",
+    )
+
+    required_fields = {
+        "run_id",
+        "execution_order",
+        "status",
+        "attempt_count",
+        "started_at_utc",
+        "finished_at_utc",
+        "failure_reason",
+        "skip_reason",
+    }
+
+    require_exact_state_fields(
+        state_data,
+        required_fields,
+        "run state",
+    )
+
+    return RunState(
+        run_id=state_data["run_id"],
+        execution_order=(
+            state_data["execution_order"]
+        ),
+        status=state_data["status"],
+        attempt_count=state_data["attempt_count"],
+        started_at_utc=(
+            state_data["started_at_utc"]
+        ),
+        finished_at_utc=(
+            state_data["finished_at_utc"]
+        ),
+        failure_reason=(
+            state_data["failure_reason"]
+        ),
+        skip_reason=state_data["skip_reason"],
+    )
+
+
+def progress_from_dict(
+    value: Any,
+) -> ControlledIlluminationProgress:
+    progress_data = require_state_mapping(
+        value,
+        "progress",
+    )
+
+    required_fields = {
+        "schema_version",
+        "experiment_id",
+        "run_plan_sha256",
+        "created_at_utc",
+        "updated_at_utc",
+        "run_count",
+        "status_counts",
+        "runs",
+    }
+
+    require_exact_state_fields(
+        progress_data,
+        required_fields,
+        "progress",
+    )
+
+    runs_data = progress_data["runs"]
+
+    if not isinstance(runs_data, list) or not runs_data:
+        raise ControlledIlluminationRunStateError(
+            "progress.runs must be a non-empty list."
+        )
+
+    progress = ControlledIlluminationProgress(
+        schema_version=progress_data[
+            "schema_version"
+        ],
+        experiment_id=progress_data[
+            "experiment_id"
+        ],
+        run_plan_sha256=progress_data[
+            "run_plan_sha256"
+        ],
+        created_at_utc=progress_data[
+            "created_at_utc"
+        ],
+        updated_at_utc=progress_data[
+            "updated_at_utc"
+        ],
+        runs=tuple(
+            run_state_from_dict(run_data)
+            for run_data in runs_data
+        ),
+    )
+
+    stored_run_count = progress_data["run_count"]
+
+    if (
+        isinstance(stored_run_count, bool)
+        or not isinstance(stored_run_count, int)
+        or stored_run_count != progress.run_count
+    ):
+        raise ControlledIlluminationRunStateError(
+            "Stored run_count does not match runs."
+        )
+
+    stored_status_counts = progress_data[
+        "status_counts"
+    ]
+
+    if not isinstance(stored_status_counts, dict):
+        raise ControlledIlluminationRunStateError(
+            "status_counts must be an object."
+        )
+
+    if stored_status_counts != progress.status_counts:
+        raise ControlledIlluminationRunStateError(
+            "Stored status_counts do not match runs."
+        )
+
+    return progress
+
+
+def validate_progress_matches_plan(
+    progress: ControlledIlluminationProgress,
+    plan: ControlledIlluminationRunPlan,
+) -> None:
+    if not isinstance(
+        progress,
+        ControlledIlluminationProgress,
+    ):
+        raise ControlledIlluminationRunStateError(
+            "progress must be "
+            "ControlledIlluminationProgress."
+        )
+
+    if not isinstance(
+        plan,
+        ControlledIlluminationRunPlan,
+    ):
+        raise ControlledIlluminationRunStateError(
+            "plan must be ControlledIlluminationRunPlan."
+        )
+
+    if progress.experiment_id != plan.experiment_id:
+        raise ControlledIlluminationRunStateError(
+            "Progress experiment_id does not "
+            "match the run plan."
+        )
+
+    expected_hash = calculate_run_plan_sha256(
+        plan
+    )
+
+    if progress.run_plan_sha256 != expected_hash:
+        raise ControlledIlluminationRunStateError(
+            "Progress was created from a different "
+            "run plan."
+        )
+
+
+def save_run_progress_atomic(
+    progress: ControlledIlluminationProgress,
+    output_path: str | Path,
+) -> Path:
+    if not isinstance(
+        progress,
+        ControlledIlluminationProgress,
+    ):
+        raise ControlledIlluminationRunStateError(
+            "progress must be "
+            "ControlledIlluminationProgress."
+        )
+
+    progress_path = Path(output_path)
+    progress_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = progress_path.with_name(
+        f".{progress_path.name}."
+        f"{uuid4().hex}.tmp"
+    )
+
+    try:
+        with temporary_path.open(
+            "w",
+            encoding="utf-8",
+        ) as progress_file:
+            json.dump(
+                progress.to_dict(),
+                progress_file,
+                indent=2,
+                ensure_ascii=False,
+            )
+            progress_file.write("\n")
+            progress_file.flush()
+            os.fsync(progress_file.fileno())
+
+        os.replace(
+            temporary_path,
+            progress_path,
+        )
+    finally:
+        temporary_path.unlink(
+            missing_ok=True,
+        )
+
+    return progress_path
+
+
+def load_run_progress(
+    progress_path: str | Path,
+    *,
+    plan: ControlledIlluminationRunPlan | None = None,
+) -> ControlledIlluminationProgress:
+    input_path = Path(progress_path)
+
+    if not input_path.is_file():
+        raise ControlledIlluminationRunStateError(
+            f"Progress file was not found: {input_path}"
+        )
+
+    try:
+        with input_path.open(
+            "r",
+            encoding="utf-8",
+        ) as progress_file:
+            progress_data = json.load(
+                progress_file
+            )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ) as error:
+        raise ControlledIlluminationRunStateError(
+            f"Progress file could not be loaded: "
+            f"{input_path}: {error}"
+        ) from error
+
+    progress = progress_from_dict(
+        progress_data
+    )
+
+    if plan is not None:
+        validate_progress_matches_plan(
+            progress,
+            plan,
+        )
+
+    return progress
+
+
+def load_or_initialize_run_progress(
+    plan: ControlledIlluminationRunPlan,
+    progress_path: str | Path,
+    *,
+    created_at_utc: str,
+) -> ControlledIlluminationProgress:
+    output_path = Path(progress_path)
+
+    if output_path.exists():
+        return load_run_progress(
+            output_path,
+            plan=plan,
+        )
+
+    progress = initialize_run_progress(
+        plan,
+        created_at_utc=created_at_utc,
+    )
+
+    save_run_progress_atomic(
+        progress,
+        output_path,
+    )
+
+    return progress

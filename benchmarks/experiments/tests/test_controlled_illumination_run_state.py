@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
 import unittest
+from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -18,6 +22,10 @@ from benchmarks.experiments.controlled_illumination_run_state import (
     initialize_run_progress,
     transition_progress_run,
     transition_run_state,
+    load_or_initialize_run_progress,
+    load_run_progress,
+    progress_from_dict,
+    save_run_progress_atomic,
 )
 
 
@@ -479,6 +487,248 @@ class ControlledIlluminationRunStateTests(
                     "2026-08-23T09:30:00Z"
                 ),
             )
+    def test_progress_save_and_load_round_trip(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        with TemporaryDirectory() as temporary:
+            progress_path = (
+                Path(temporary)
+                / "run_progress.json"
+            )
+
+            save_run_progress_atomic(
+                progress,
+                progress_path,
+            )
+            loaded = load_run_progress(
+                progress_path,
+                plan=plan,
+            )
+
+        self.assertEqual(
+            loaded.to_dict(),
+            progress.to_dict(),
+        )
+
+    def test_atomic_save_removes_temporary_file(
+        self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        with TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            progress_path = (
+                temporary_path
+                / "run_progress.json"
+            )
+
+            save_run_progress_atomic(
+                progress,
+                progress_path,
+            )
+
+            temporary_files = [
+                path
+                for path in temporary_path.iterdir()
+                if path.name.endswith(".tmp")
+            ]
+
+            self.assertEqual(
+                temporary_files,
+                [],
+            )
+
+    def test_load_or_initialize_creates_progress(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+
+        with TemporaryDirectory() as temporary:
+            progress_path = (
+                Path(temporary)
+                / "run_progress.json"
+            )
+
+            progress = (
+                load_or_initialize_run_progress(
+                    plan,
+                    progress_path,
+                    created_at_utc=(
+                        "2026-08-23T09:30:00Z"
+                    ),
+                )
+            )
+
+            self.assertTrue(
+                progress_path.is_file()
+            )
+            self.assertEqual(
+                progress.run_count,
+                2,
+            )
+
+    def test_load_or_initialize_resumes_progress(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+
+        with TemporaryDirectory() as temporary:
+            progress_path = (
+                Path(temporary)
+                / "run_progress.json"
+            )
+
+            progress = (
+                load_or_initialize_run_progress(
+                    plan,
+                    progress_path,
+                    created_at_utc=(
+                        "2026-08-23T09:30:00Z"
+                    ),
+                )
+            )
+            progress = transition_progress_run(
+                progress,
+                "experiment-progress-run-0001",
+                RunStatus.RUNNING,
+                STARTED_AT,
+            )
+            save_run_progress_atomic(
+                progress,
+                progress_path,
+            )
+
+            resumed = (
+                load_or_initialize_run_progress(
+                    plan,
+                    progress_path,
+                    created_at_utc=(
+                        "2026-08-23T11:00:00Z"
+                    ),
+                )
+            )
+
+        self.assertEqual(
+            resumed.get_run_state(
+                "experiment-progress-run-0001"
+            ).status,
+            RunStatus.RUNNING,
+        )
+        self.assertEqual(
+            resumed.created_at_utc,
+            "2026-08-23T09:30:00Z",
+        )
+
+    def test_different_run_plan_is_rejected(
+        self,
+    ) -> None:
+        plan = self.build_run_plan()
+        different_plan = replace(
+            plan,
+            randomization_seed=20260822,
+        )
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        with TemporaryDirectory() as temporary:
+            progress_path = (
+                Path(temporary)
+                / "run_progress.json"
+            )
+
+            save_run_progress_atomic(
+                progress,
+                progress_path,
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunStateError,
+                "different run plan",
+            ):
+                load_run_progress(
+                    progress_path,
+                    plan=different_plan,
+                )
+
+    def test_modified_run_count_is_rejected(
+        self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+        progress_data = progress.to_dict()
+        progress_data["run_count"] = 999
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunStateError,
+            "run_count",
+        ):
+            progress_from_dict(
+                progress_data
+            )
+
+    def test_modified_status_counts_are_rejected(
+        self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+        progress_data = progress.to_dict()
+        progress_data["status_counts"][
+            "planned"
+        ] = 999
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunStateError,
+            "status_counts",
+        ):
+            progress_from_dict(
+                progress_data
+            )
+
+    def test_invalid_progress_json_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            progress_path = (
+                Path(temporary)
+                / "run_progress.json"
+            )
+            progress_path.write_text(
+                "{invalid-json",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunStateError,
+                "could not be loaded",
+            ):
+                load_run_progress(
+                    progress_path
+                )
 
 
 if __name__ == "__main__":

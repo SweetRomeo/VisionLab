@@ -729,6 +729,58 @@ class ControlledIlluminationRunStateTests(
                 load_run_progress(
                     progress_path
                 )
+    def test_finished_timestamp_before_started_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunStateError,
+            "finished_at_utc must not be earlier",
+        ):
+            RunState(
+                run_id="run-chronology",
+                execution_order=1,
+                status=RunStatus.COMPLETED,
+                attempt_count=1,
+                started_at_utc=(
+                    "2026-08-23T10:00:00Z"
+                ),
+                finished_at_utc=(
+                    "2026-08-23T09:59:59Z"
+                ),
+                failure_reason=None,
+                skip_reason=None,
+            )
+
+    def test_progress_update_before_creation_is_rejected(
+        self,
+    ) -> None:
+        planned_run = RunState(
+            run_id="run-chronology",
+            execution_order=1,
+            status=RunStatus.PLANNED,
+            attempt_count=0,
+            started_at_utc=None,
+            finished_at_utc=None,
+            failure_reason=None,
+            skip_reason=None,
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunStateError,
+            "updated_at_utc must not be earlier",
+        ):
+            ControlledIlluminationProgress(
+                schema_version=1,
+                experiment_id="experiment-chronology",
+                run_plan_sha256="a" * 64,
+                created_at_utc=(
+                    "2026-08-23T10:00:00Z"
+                ),
+                updated_at_utc=(
+                    "2026-08-23T09:59:59Z"
+                ),
+                runs=(planned_run,),
+            )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any
 from dataclasses import dataclass, replace
@@ -147,6 +148,18 @@ def validate_optional_timestamp(
             str(error)
         ) from error
 
+def parse_validated_state_timestamp(
+    value: str,
+) -> datetime:
+    normalized_value = (
+        f"{value[:-1]}+00:00"
+        if value.endswith("Z")
+        else value
+    )
+
+    return datetime.fromisoformat(
+        normalized_value
+    )
 
 def validate_optional_reason(
     value: Any,
@@ -204,6 +217,22 @@ class RunState:
             self.finished_at_utc,
             "finished_at_utc",
         )
+
+        if (
+                self.started_at_utc is not None
+                and self.finished_at_utc is not None
+                and parse_validated_state_timestamp(
+            self.finished_at_utc
+        )
+                < parse_validated_state_timestamp(
+            self.started_at_utc
+        )
+        ):
+            raise ControlledIlluminationRunStateError(
+                "finished_at_utc must not be earlier "
+                "than started_at_utc."
+            )
+
         validate_optional_reason(
             self.failure_reason,
             "failure_reason",
@@ -493,6 +522,16 @@ class ControlledIlluminationProgress:
             self.updated_at_utc,
             "updated_at_utc",
         )
+
+        if parse_validated_state_timestamp(
+                self.updated_at_utc
+        ) < parse_validated_state_timestamp(
+            self.created_at_utc
+        ):
+            raise ControlledIlluminationRunStateError(
+                "updated_at_utc must not be earlier "
+                "than created_at_utc."
+            )
 
         if not isinstance(self.runs, tuple) or not self.runs:
             raise ControlledIlluminationRunStateError(

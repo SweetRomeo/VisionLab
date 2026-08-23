@@ -13,11 +13,14 @@ from dataclasses import replace
 from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlan,
     PlannedRun,
+    load_run_plan_manifest,
 )
 
 from benchmarks.experiments.controlled_illumination_run_state import (
     ControlledIlluminationProgress,
     RunStatus,
+    load_or_initialize_run_progress,
+    save_run_progress_atomic,
     transition_progress_run,
     validate_progress_matches_plan,
 )
@@ -438,6 +441,51 @@ def execute_next_planned_run(
         planned_run=planned_run,
         execution_result=execution_result,
         progress=final_progress,
+    )
+
+def execute_next_planned_run_from_files(
+    plan_path: str | Path,
+    progress_path: str | Path,
+    runner_registry: ArchitectureRunnerRegistry,
+    *,
+    timestamp_provider: TimestampProvider,
+) -> OrchestratedRunOutcome | None:
+    if not callable(timestamp_provider):
+        raise ControlledIlluminationExecutionError(
+            "timestamp_provider must be callable."
+        )
+
+    resolved_plan_path = Path(
+        plan_path
+    ).resolve()
+    resolved_progress_path = Path(
+        progress_path
+    ).resolve()
+
+    plan = load_run_plan_manifest(
+        resolved_plan_path
+    )
+
+    progress = load_or_initialize_run_progress(
+        plan,
+        resolved_progress_path,
+        created_at_utc=timestamp_provider(),
+    )
+
+    def persist_progress(
+        updated_progress: ControlledIlluminationProgress,
+    ) -> object:
+        return save_run_progress_atomic(
+            updated_progress,
+            resolved_progress_path,
+        )
+
+    return execute_next_planned_run(
+        plan,
+        progress,
+        runner_registry,
+        timestamp_provider=timestamp_provider,
+        persist_progress=persist_progress,
     )
 
 class SubprocessArchitectureRunner:

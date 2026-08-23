@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import unittest
 from unittest.mock import patch
+from tempfile import TemporaryDirectory
 
 from benchmarks.experiments.controlled_illumination_executor import (
     ArchitectureRunnerRegistry,
@@ -14,6 +15,7 @@ from benchmarks.experiments.controlled_illumination_executor import (
     SubprocessArchitectureRunner,
     execute_next_planned_run,
     select_next_planned_run,
+    execute_next_planned_run_from_files,
 )
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -21,11 +23,13 @@ from benchmarks.experiments.controlled_illumination_metadata import (
 from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlan,
     PlannedRun,
+    write_run_plan_manifests_atomic,
 )
 from benchmarks.experiments.controlled_illumination_run_state import (
     RunStatus,
     initialize_run_progress,
     transition_progress_run,
+    load_run_progress,
 )
 
 
@@ -582,6 +586,162 @@ class ControlledIlluminationExecutorTests(
             "runner exploded",
         )
 
+    def test_file_execution_creates_progress(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            plan = self.build_run_plan()
+
+            plan_path, _ = (
+                write_run_plan_manifests_atomic(
+                    plan,
+                    temporary_path,
+                )
+            )
+            progress_path = (
+                    temporary_path
+                    / "run_progress.json"
+            )
+            timestamps = iter(
+                (
+                    "2026-08-24T09:01:00Z",
+                    "2026-08-24T09:02:00Z",
+                    "2026-08-24T09:03:00Z",
+                )
+            )
+
+            outcome = (
+                execute_next_planned_run_from_files(
+                    plan_path,
+                    progress_path,
+                    ArchitectureRunnerRegistry(
+                        self.build_runners()
+                    ),
+                    timestamp_provider=lambda: next(
+                        timestamps
+                    ),
+                )
+            )
+
+            persisted_progress = load_run_progress(
+                progress_path,
+                plan=plan,
+            )
+
+        self.assertIsNotNone(outcome)
+        self.assertTrue(outcome.succeeded)
+        self.assertEqual(
+            persisted_progress.get_run_state(
+                plan.runs[0].run_id
+            ).status,
+            RunStatus.COMPLETED,
+        )
+        self.assertEqual(
+            persisted_progress.get_run_state(
+                plan.runs[1].run_id
+            ).status,
+            RunStatus.PLANNED,
+        )
+
+    def test_file_execution_resumes_existing_progress(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            temporary_path = Path(temporary)
+            plan = self.build_run_plan()
+
+            plan_path, _ = (
+                write_run_plan_manifests_atomic(
+                    plan,
+                    temporary_path,
+                )
+            )
+            progress_path = (
+                    temporary_path
+                    / "run_progress.json"
+            )
+            runner_registry = (
+                ArchitectureRunnerRegistry(
+                    self.build_runners()
+                )
+            )
+
+            first_timestamps = iter(
+                (
+                    "2026-08-24T09:01:00Z",
+                    "2026-08-24T09:02:00Z",
+                    "2026-08-24T09:03:00Z",
+                )
+            )
+
+            first_outcome = (
+                execute_next_planned_run_from_files(
+                    plan_path,
+                    progress_path,
+                    runner_registry,
+                    timestamp_provider=lambda: next(
+                        first_timestamps
+                    ),
+                )
+            )
+
+            second_timestamps = iter(
+                (
+                    "2026-08-24T09:04:00Z",
+                    "2026-08-24T09:05:00Z",
+                    "2026-08-24T09:06:00Z",
+                )
+            )
+
+            second_outcome = (
+                execute_next_planned_run_from_files(
+                    plan_path,
+                    progress_path,
+                    runner_registry,
+                    timestamp_provider=lambda: next(
+                        second_timestamps
+                    ),
+                )
+            )
+
+            no_run_outcome = (
+                execute_next_planned_run_from_files(
+                    plan_path,
+                    progress_path,
+                    runner_registry,
+                    timestamp_provider=lambda: (
+                        "2026-08-24T09:07:00Z"
+                    ),
+                )
+            )
+
+            persisted_progress = load_run_progress(
+                progress_path,
+                plan=plan,
+            )
+
+        self.assertIsNotNone(first_outcome)
+        self.assertEqual(
+            first_outcome.planned_run.run_id,
+            plan.runs[0].run_id,
+        )
+
+        self.assertIsNotNone(second_outcome)
+        self.assertEqual(
+            second_outcome.planned_run.run_id,
+            plan.runs[1].run_id,
+        )
+
+        self.assertIsNone(no_run_outcome)
+
+        for planned_run in plan.runs:
+            self.assertEqual(
+                persisted_progress.get_run_state(
+                    planned_run.run_id
+                ).status,
+                RunStatus.COMPLETED,
+            )
 
 if __name__ == "__main__":
     unittest.main()

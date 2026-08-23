@@ -4,6 +4,7 @@ import argparse
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Callable
 
 from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlanError,
@@ -55,7 +56,6 @@ def create_argument_parser(
         dest="command",
         required=True,
     )
-
     subparsers.add_parser(
         "init",
         help=(
@@ -70,6 +70,59 @@ def create_argument_parser(
     subparsers.add_parser(
         "start-next",
         help="Start the next planned run.",
+    )
+
+    complete_parser = subparsers.add_parser(
+        "complete",
+        help="Mark a running run as completed.",
+    )
+    complete_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run identifier to complete.",
+    )
+
+    fail_parser = subparsers.add_parser(
+        "fail",
+        help="Mark a running run as failed.",
+    )
+    fail_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run identifier to fail.",
+    )
+    fail_parser.add_argument(
+        "--reason",
+        required=True,
+        help="Failure reason.",
+    )
+
+    skip_parser = subparsers.add_parser(
+        "skip",
+        help="Skip a planned run.",
+    )
+    skip_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run identifier to skip.",
+    )
+    skip_parser.add_argument(
+        "--reason",
+        required=True,
+        help="Skip reason.",
+    )
+
+    replan_parser = subparsers.add_parser(
+        "replan",
+        help=(
+            "Return a failed or skipped run "
+            "to planned status."
+        ),
+    )
+    replan_parser.add_argument(
+        "--run-id",
+        required=True,
+        help="Run identifier to replan.",
     )
 
     return parser
@@ -224,6 +277,43 @@ def start_next_command(
 
     return updated_progress
 
+def update_run_status_command(
+    plan_path: Path,
+    progress_path: Path,
+    *,
+    run_id: str,
+    target_status: RunStatus,
+    now_provider: Callable[[], str],
+    reason: str | None = None,
+) -> ControlledIlluminationProgress:
+    plan = load_run_plan_manifest(plan_path)
+    progress = load_run_progress(
+        progress_path,
+        plan=plan,
+    )
+
+    updated_progress = transition_progress_run(
+        progress,
+        run_id,
+        target_status,
+        now_provider(),
+        reason=reason,
+    )
+
+    save_run_progress_atomic(
+        updated_progress,
+        progress_path,
+    )
+
+    print(
+        f"Run updated: {run_id} -> "
+        f"{target_status.value}"
+    )
+
+    if reason is not None:
+        print(f"Reason: {reason}")
+
+    return updated_progress
 
 def run_cli(
     arguments: argparse.Namespace,
@@ -255,6 +345,48 @@ def run_cli(
         start_next_command(
             plan_path,
             progress_path,
+            now_provider=now_provider,
+        )
+        return 0
+
+    if arguments.command == "complete":
+        update_run_status_command(
+            plan_path,
+            progress_path,
+            run_id=arguments.run_id,
+            target_status=RunStatus.COMPLETED,
+            now_provider=now_provider,
+        )
+        return 0
+
+    if arguments.command == "fail":
+        update_run_status_command(
+            plan_path,
+            progress_path,
+            run_id=arguments.run_id,
+            target_status=RunStatus.FAILED,
+            now_provider=now_provider,
+            reason=arguments.reason,
+        )
+        return 0
+
+    if arguments.command == "skip":
+        update_run_status_command(
+            plan_path,
+            progress_path,
+            run_id=arguments.run_id,
+            target_status=RunStatus.SKIPPED,
+            now_provider=now_provider,
+            reason=arguments.reason,
+        )
+        return 0
+
+    if arguments.command == "replan":
+        update_run_status_command(
+            plan_path,
+            progress_path,
+            run_id=arguments.run_id,
+            target_status=RunStatus.PLANNED,
             now_provider=now_provider,
         )
         return 0

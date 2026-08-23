@@ -361,6 +361,16 @@ def transition_run_state(
         )
     )
 
+    if parse_validated_state_timestamp(
+            transition_timestamp
+    ) < parse_validated_state_timestamp(
+        progress.updated_at_utc
+    ):
+        raise ControlledIlluminationRunStateError(
+            "transitioned_at_utc must not be earlier "
+            "than progress.updated_at_utc."
+        )
+
     allowed_targets = ALLOWED_STATUS_TRANSITIONS[
         state.status
     ]

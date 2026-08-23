@@ -4,7 +4,6 @@ import argparse
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Callable
 
 from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlanError,

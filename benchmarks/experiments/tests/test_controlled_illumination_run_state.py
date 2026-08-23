@@ -782,6 +782,40 @@ class ControlledIlluminationRunStateTests(
                 runs=(planned_run,),
             )
 
+    def test_progress_transition_rejects_earlier_timestamp(
+            self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        progress = transition_progress_run(
+            progress,
+            "experiment-progress-run-0001",
+            RunStatus.RUNNING,
+            STARTED_AT,
+        )
+
+        progress = transition_progress_run(
+            progress,
+            "experiment-progress-run-0001",
+            RunStatus.COMPLETED,
+            FINISHED_AT,
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunStateError,
+                "progress.updated_at_utc",
+        ):
+            transition_progress_run(
+                progress,
+                "experiment-progress-run-0002",
+                RunStatus.RUNNING,
+                "2026-08-23T10:04:00Z",
+            )
 
 if __name__ == "__main__":
     unittest.main()

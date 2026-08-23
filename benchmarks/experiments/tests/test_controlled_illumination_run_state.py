@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import unittest
 
+from benchmarks.experiments.controlled_illumination_metadata import (
+    ResolutionMetadata,
+)
+from benchmarks.experiments.controlled_illumination_run_planner import (
+    ControlledIlluminationRunPlan,
+    PlannedRun,
+)
 from benchmarks.experiments.controlled_illumination_run_state import (
+    ControlledIlluminationProgress,
     ControlledIlluminationRunStateError,
     RunState,
     RunStatus,
+    calculate_run_plan_sha256,
+    initialize_run_progress,
+    transition_progress_run,
     transition_run_state,
 )
 
@@ -239,6 +250,234 @@ class ControlledIlluminationRunStateTests(
                 attempt_count=1,
                 started_at_utc=STARTED_AT,
                 finished_at_utc=FINISHED_AT,
+            )
+
+    def build_run_plan(
+        self,
+    ) -> ControlledIlluminationRunPlan:
+        planned_runs = tuple(
+            PlannedRun(
+                execution_order=execution_order,
+                experiment_id="experiment-progress",
+                run_id=run_id,
+                phase="constant_lux",
+                platform="desktop",
+                architecture="pure_python",
+                algorithm="original",
+                resolution=ResolutionMetadata(
+                    width=640,
+                    height=480,
+                ),
+                trial_number=execution_order,
+                incidence_angle_degrees=0.0,
+                target_illuminance_lux=50.0,
+                source_output_setting=None,
+                target_fps=30.0,
+                frame_deadline_ms=1000.0 / 30.0,
+            )
+            for execution_order, run_id in (
+                (1, "experiment-progress-run-0001"),
+                (2, "experiment-progress-run-0002"),
+            )
+        )
+
+        return ControlledIlluminationRunPlan(
+            schema_version=1,
+            generated_at_utc=(
+                "2026-08-23T09:00:00Z"
+            ),
+            experiment_id="experiment-progress",
+            randomized=False,
+            randomization_seed=20260821,
+            runs=planned_runs,
+        )
+
+    def test_progress_is_initialized_from_plan(
+            self,
+    ) -> None:
+        plan = self.build_run_plan()
+
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        self.assertEqual(progress.run_count, 2)
+        self.assertEqual(
+            progress.experiment_id,
+            plan.experiment_id,
+        )
+        self.assertEqual(
+            len(progress.run_plan_sha256),
+            64,
+        )
+        self.assertEqual(
+            progress.next_planned_run.run_id,
+            "experiment-progress-run-0001",
+        )
+
+    def test_run_plan_hash_is_deterministic(
+            self,
+    ) -> None:
+        plan = self.build_run_plan()
+
+        self.assertEqual(
+            calculate_run_plan_sha256(plan),
+            calculate_run_plan_sha256(plan),
+        )
+
+    def test_progress_transition_updates_run(
+            self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        updated = transition_progress_run(
+            progress,
+            "experiment-progress-run-0001",
+            RunStatus.RUNNING,
+            STARTED_AT,
+        )
+
+        first_run = updated.get_run_state(
+            "experiment-progress-run-0001"
+        )
+
+        self.assertEqual(
+            first_run.status,
+            RunStatus.RUNNING,
+        )
+        self.assertEqual(
+            updated.updated_at_utc,
+            STARTED_AT,
+        )
+        self.assertEqual(
+            updated.next_planned_run.run_id,
+            "experiment-progress-run-0002",
+        )
+
+    def test_only_one_run_can_be_running(
+            self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+        progress = transition_progress_run(
+            progress,
+            "experiment-progress-run-0001",
+            RunStatus.RUNNING,
+            STARTED_AT,
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunStateError,
+                "already running",
+        ):
+            transition_progress_run(
+                progress,
+                "experiment-progress-run-0002",
+                RunStatus.RUNNING,
+                "2026-08-23T10:01:00Z",
+            )
+
+    def test_unknown_run_id_is_rejected(
+            self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunStateError,
+                "Unknown run ID",
+        ):
+            progress.get_run_state(
+                "unknown-run"
+            )
+
+    def test_completed_run_advances_next_planned(
+            self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+        progress = transition_progress_run(
+            progress,
+            "experiment-progress-run-0001",
+            RunStatus.RUNNING,
+            STARTED_AT,
+        )
+        progress = transition_progress_run(
+            progress,
+            "experiment-progress-run-0001",
+            RunStatus.COMPLETED,
+            FINISHED_AT,
+        )
+
+        self.assertEqual(
+            progress.next_planned_run.run_id,
+            "experiment-progress-run-0002",
+        )
+        self.assertEqual(
+            progress.status_counts["completed"],
+            1,
+        )
+        self.assertEqual(
+            progress.status_counts["planned"],
+            1,
+        )
+
+    def test_progress_is_serialized(
+            self,
+    ) -> None:
+        progress = initialize_run_progress(
+            self.build_run_plan(),
+            created_at_utc=(
+                "2026-08-23T09:30:00Z"
+            ),
+        )
+
+        serialized = progress.to_dict()
+
+        self.assertEqual(
+            serialized["run_count"],
+            2,
+        )
+        self.assertEqual(
+            serialized["status_counts"]["planned"],
+            2,
+        )
+        self.assertEqual(
+            len(serialized["runs"]),
+            2,
+        )
+
+    def test_invalid_plan_type_is_rejected(
+            self,
+    ) -> None:
+        with self.assertRaises(
+                ControlledIlluminationRunStateError
+        ):
+            initialize_run_progress(
+                "invalid-plan",  # type: ignore[arg-type]
+                created_at_utc=(
+                    "2026-08-23T09:30:00Z"
+                ),
             )
 
 

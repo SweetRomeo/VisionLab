@@ -4,9 +4,17 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 from dataclasses import dataclass, replace
+import hashlib
+import json
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     validate_utc_timestamp,
+    ResolutionMetadata,
+)
+
+from benchmarks.experiments.controlled_illumination_run_planner import (
+    ControlledIlluminationRunPlan,
+    PlannedRun,
 )
 
 
@@ -283,21 +291,21 @@ class RunState:
             "skip_reason": self.skip_reason,
         }
 
-    def validate_required_state_timestamp(
-            value: Any,
-            field_name: str,
-    ) -> str:
-        timestamp = require_non_empty_state_string(
-            value,
-            field_name,
-        )
+def validate_required_state_timestamp(
+        value: Any,
+        field_name: str,
+) -> str:
+    timestamp = require_non_empty_state_string(
+        value,
+        field_name,
+    )
 
-        validate_optional_timestamp(
-            timestamp,
-            field_name,
-        )
+    validate_optional_timestamp(
+        timestamp,
+        field_name,
+    )
 
-        return timestamp
+    return timestamp
 
 def transition_run_state(
         state: RunState,
@@ -399,4 +407,300 @@ def transition_run_state(
 
     raise ControlledIlluminationRunStateError(
         "Unsupported run-state transition."
+    )
+
+def calculate_run_plan_sha256(
+    plan: ControlledIlluminationRunPlan,
+) -> str:
+    if not isinstance(
+        plan,
+        ControlledIlluminationRunPlan,
+    ):
+        raise ControlledIlluminationRunStateError(
+            "plan must be ControlledIlluminationRunPlan."
+        )
+
+    canonical_plan = json.dumps(
+        plan.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    return hashlib.sha256(
+        canonical_plan
+    ).hexdigest()
+
+
+def validate_run_plan_sha256(
+    value: Any,
+) -> str:
+    hash_value = require_non_empty_state_string(
+        value,
+        "run_plan_sha256",
+    )
+
+    if (
+        len(hash_value) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in hash_value
+        )
+    ):
+        raise ControlledIlluminationRunStateError(
+            "run_plan_sha256 must be a lowercase "
+            "SHA-256 value."
+        )
+
+    return hash_value
+
+
+@dataclass(frozen=True)
+class ControlledIlluminationProgress:
+    schema_version: int
+    experiment_id: str
+    run_plan_sha256: str
+    created_at_utc: str
+    updated_at_utc: str
+    runs: tuple[RunState, ...]
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version
+            != RUN_PROGRESS_SCHEMA_VERSION
+        ):
+            raise ControlledIlluminationRunStateError(
+                "schema_version must be 1."
+            )
+
+        require_non_empty_state_string(
+            self.experiment_id,
+            "experiment_id",
+        )
+        validate_run_plan_sha256(
+            self.run_plan_sha256
+        )
+        validate_required_state_timestamp(
+            self.created_at_utc,
+            "created_at_utc",
+        )
+        validate_required_state_timestamp(
+            self.updated_at_utc,
+            "updated_at_utc",
+        )
+
+        if not isinstance(self.runs, tuple) or not self.runs:
+            raise ControlledIlluminationRunStateError(
+                "runs must be a non-empty tuple."
+            )
+
+        if not all(
+            isinstance(run_state, RunState)
+            for run_state in self.runs
+        ):
+            raise ControlledIlluminationRunStateError(
+                "Every runs item must be RunState."
+            )
+
+        expected_orders = list(
+            range(1, len(self.runs) + 1)
+        )
+        actual_orders = [
+            run_state.execution_order
+            for run_state in self.runs
+        ]
+
+        if actual_orders != expected_orders:
+            raise ControlledIlluminationRunStateError(
+                "execution_order values must be "
+                "sequential and start at 1."
+            )
+
+        run_ids = [
+            run_state.run_id
+            for run_state in self.runs
+        ]
+
+        if len(run_ids) != len(set(run_ids)):
+            raise ControlledIlluminationRunStateError(
+                "Run IDs must be unique."
+            )
+
+        running_count = sum(
+            run_state.status == RunStatus.RUNNING
+            for run_state in self.runs
+        )
+
+        if running_count > 1:
+            raise ControlledIlluminationRunStateError(
+                "Only one run may be running."
+            )
+
+    @property
+    def run_count(self) -> int:
+        return len(self.runs)
+
+    @property
+    def status_counts(self) -> dict[str, int]:
+        return {
+            status.value: sum(
+                run_state.status == status
+                for run_state in self.runs
+            )
+            for status in RunStatus
+        }
+
+    @property
+    def next_planned_run(
+        self,
+    ) -> RunState | None:
+        return next(
+            (
+                run_state
+                for run_state in self.runs
+                if run_state.status
+                == RunStatus.PLANNED
+            ),
+            None,
+        )
+
+    def get_run_state(
+        self,
+        run_id: str,
+    ) -> RunState:
+        require_non_empty_state_string(
+            run_id,
+            "run_id",
+        )
+
+        for run_state in self.runs:
+            if run_state.run_id == run_id:
+                return run_state
+
+        raise ControlledIlluminationRunStateError(
+            f"Unknown run ID: {run_id}"
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "experiment_id": self.experiment_id,
+            "run_plan_sha256": (
+                self.run_plan_sha256
+            ),
+            "created_at_utc": self.created_at_utc,
+            "updated_at_utc": self.updated_at_utc,
+            "run_count": self.run_count,
+            "status_counts": self.status_counts,
+            "runs": [
+                run_state.to_dict()
+                for run_state in self.runs
+            ],
+        }
+
+
+def initialize_run_progress(
+    plan: ControlledIlluminationRunPlan,
+    *,
+    created_at_utc: str,
+) -> ControlledIlluminationProgress:
+    if not isinstance(
+        plan,
+        ControlledIlluminationRunPlan,
+    ):
+        raise ControlledIlluminationRunStateError(
+            "plan must be ControlledIlluminationRunPlan."
+        )
+
+    creation_timestamp = (
+        validate_required_state_timestamp(
+            created_at_utc,
+            "created_at_utc",
+        )
+    )
+
+    run_states = tuple(
+        RunState(
+            run_id=planned_run.run_id,
+            execution_order=(
+                planned_run.execution_order
+            ),
+        )
+        for planned_run in plan.runs
+    )
+
+    return ControlledIlluminationProgress(
+        schema_version=RUN_PROGRESS_SCHEMA_VERSION,
+        experiment_id=plan.experiment_id,
+        run_plan_sha256=(
+            calculate_run_plan_sha256(plan)
+        ),
+        created_at_utc=creation_timestamp,
+        updated_at_utc=creation_timestamp,
+        runs=run_states,
+    )
+
+
+def transition_progress_run(
+    progress: ControlledIlluminationProgress,
+    run_id: str,
+    target_status: RunStatus | str,
+    transitioned_at_utc: str,
+    *,
+    reason: str | None = None,
+) -> ControlledIlluminationProgress:
+    if not isinstance(
+        progress,
+        ControlledIlluminationProgress,
+    ):
+        raise ControlledIlluminationRunStateError(
+            "progress must be "
+            "ControlledIlluminationProgress."
+        )
+
+    current_state = progress.get_run_state(
+        run_id
+    )
+    normalized_target_status = normalize_run_status(
+        target_status
+    )
+
+    if normalized_target_status == RunStatus.RUNNING:
+        running_state = next(
+            (
+                run_state
+                for run_state in progress.runs
+                if run_state.status
+                == RunStatus.RUNNING
+                and run_state.run_id != run_id
+            ),
+            None,
+        )
+
+        if running_state is not None:
+            raise ControlledIlluminationRunStateError(
+                "Another run is already running: "
+                f"{running_state.run_id}"
+            )
+
+    updated_state = transition_run_state(
+        current_state,
+        normalized_target_status,
+        transitioned_at_utc,
+        reason=reason,
+    )
+
+    updated_runs = tuple(
+        updated_state
+        if run_state.run_id == run_id
+        else run_state
+        for run_state in progress.runs
+    )
+
+    return replace(
+        progress,
+        updated_at_utc=transitioned_at_utc,
+        runs=updated_runs,
     )

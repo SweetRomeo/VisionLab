@@ -24,6 +24,10 @@ The infrastructure in this directory does not perform the physical experiment au
 | `generate_controlled_illumination_run_plan.py` | Provides dry-run validation and JSON/CSV manifest generation through the CLI. |
 | `tests/test_controlled_illumination_run_planner.py` | Tests matrix expansion, duplicate rejection, deterministic ordering and atomic manifests. |
 | `tests/test_generate_controlled_illumination_run_plan.py` | Tests run-planner CLI dry-run and manifest-generation behavior. |
+| `controlled_illumination_run_state.py`                    | Defines run states, validated transitions, progress persistence and resume integrity.                            |
+| `manage_controlled_illumination_run.py`                   | Provides CLI commands for initializing, resuming and updating experiment execution progress.                    |
+| `tests/test_controlled_illumination_run_state.py`         | Tests state transitions, progress integrity, persistence and timestamp chronology.                              |
+| `tests/test_manage_controlled_illumination_run.py`        | Tests the controlled-illumination run-management CLI.                                                            |
 
 ## Experiment phases
 
@@ -385,3 +389,118 @@ benchmarks.experiments.generate_controlled_illumination_run_plan \
 
 Generated run plans are experimental outputs and must not be committed
 to the repository.
+
+## Resumable run execution tracking
+
+The run-tracking CLI records the execution state of every run in a controlled-illumination manifest. It supports interruption recovery without losing completed, failed or skipped run information.
+
+By default, progress is stored beside the selected run plan:
+
+```text
+<run-plan-directory>/run_progress.json
+```
+
+The progress file is written atomically and bound to the run-plan manifest by its SHA-256 hash. A progress file cannot be resumed with a modified or different run plan.
+
+### Run states
+
+Each run uses one of the following states:
+
+* `planned`
+* `running`
+* `completed`
+* `failed`
+* `skipped`
+
+Only one run may be in the `running` state at a time. Invalid state transitions and inconsistent timestamps are rejected.
+
+### Initialize or resume progress
+
+From the repository root:
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+init
+```
+
+If a compatible progress file already exists, it is loaded instead of overwritten.
+
+### Display experiment status
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+status
+```
+
+### Start the next planned run
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+start-next
+```
+
+The command selects the next run according to `execution_order`.
+
+### Complete a running run
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+complete \
+--run-id RUN_ID
+```
+
+### Mark a running run as failed
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+fail \
+--run-id RUN_ID \
+--reason "Failure reason"
+```
+
+### Skip a planned run
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+skip \
+--run-id RUN_ID \
+--reason "Skip reason"
+```
+
+### Return a failed or skipped run to planned status
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+replan \
+--run-id RUN_ID
+```
+
+Replanning preserves the previous attempt count. Starting the run again increments the attempt count.
+
+### Custom progress path
+
+Use `--progress` before the subcommand when the progress file must be stored elsewhere:
+
+```bash
+python -m \
+benchmarks.experiments.manage_controlled_illumination_run \
+--plan path/to/run_plan.json \
+--progress path/to/run_progress.json \
+status
+```
+
+Generated `run_progress.json` files are experiment artifacts and must not be committed to Git.

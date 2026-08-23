@@ -370,6 +370,25 @@ def execute_next_planned_run(
         execution_result = runner(
             planned_run
         )
+    except KeyboardInterrupt:
+        interrupted_progress = (
+            transition_progress_run(
+                running_progress,
+                planned_run.run_id,
+                RunStatus.FAILED,
+                timestamp_provider(),
+                reason=(
+                    "Architecture runner was "
+                    "interrupted by the user."
+                ),
+            )
+        )
+
+        persist_progress(
+            interrupted_progress
+        )
+
+        raise
     except Exception as error:
         failure_reason = (
             str(error).strip()

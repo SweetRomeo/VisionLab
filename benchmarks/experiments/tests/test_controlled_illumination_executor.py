@@ -743,5 +743,60 @@ class ControlledIlluminationExecutorTests(
                 RunStatus.COMPLETED,
             )
 
+    def test_runner_interrupt_marks_run_failed(
+            self,
+    ) -> None:
+        plan = self.build_run_plan()
+        progress = initialize_run_progress(
+            plan,
+            created_at_utc="2026-08-24T09:01:00Z",
+        )
+
+        def interrupted_runner(
+                planned_run,
+        ) -> RunnerExecutionResult:
+            raise KeyboardInterrupt
+
+        runners = self.build_runners()
+        runners["pure_python"] = interrupted_runner
+        saved_progress = []
+        timestamps = iter(
+            (
+                "2026-08-24T09:02:00Z",
+                "2026-08-24T09:03:00Z",
+            )
+        )
+
+        with self.assertRaises(
+                KeyboardInterrupt
+        ):
+            execute_next_planned_run(
+                plan,
+                progress,
+                ArchitectureRunnerRegistry(runners),
+                timestamp_provider=lambda: next(
+                    timestamps
+                ),
+                persist_progress=saved_progress.append,
+            )
+
+        interrupted_state = (
+            saved_progress[-1].get_run_state(
+                plan.runs[0].run_id
+            )
+        )
+
+        self.assertEqual(
+            interrupted_state.status,
+            RunStatus.FAILED,
+        )
+        self.assertEqual(
+            interrupted_state.failure_reason,
+            (
+                "Architecture runner was "
+                "interrupted by the user."
+            ),
+        )
+
 if __name__ == "__main__":
     unittest.main()

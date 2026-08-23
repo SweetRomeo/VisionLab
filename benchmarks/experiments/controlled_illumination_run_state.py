@@ -361,16 +361,6 @@ def transition_run_state(
         )
     )
 
-    if parse_validated_state_timestamp(
-            transition_timestamp
-    ) < parse_validated_state_timestamp(
-        progress.updated_at_utc
-    ):
-        raise ControlledIlluminationRunStateError(
-            "transitioned_at_utc must not be earlier "
-            "than progress.updated_at_utc."
-        )
-
     allowed_targets = ALLOWED_STATUS_TRANSITIONS[
         state.status
     ]
@@ -694,7 +684,6 @@ def initialize_run_progress(
         runs=run_states,
     )
 
-
 def transition_progress_run(
     progress: ControlledIlluminationProgress,
     run_id: str,
@@ -715,18 +704,38 @@ def transition_progress_run(
     current_state = progress.get_run_state(
         run_id
     )
+
     normalized_target_status = normalize_run_status(
         target_status
     )
+
+    transition_timestamp = (
+        validate_required_state_timestamp(
+            transitioned_at_utc,
+            "transitioned_at_utc",
+        )
+    )
+
+    if parse_validated_state_timestamp(
+        transition_timestamp
+    ) < parse_validated_state_timestamp(
+        progress.updated_at_utc
+    ):
+        raise ControlledIlluminationRunStateError(
+            "transitioned_at_utc must not be earlier "
+            "than progress.updated_at_utc."
+        )
 
     if normalized_target_status == RunStatus.RUNNING:
         running_state = next(
             (
                 run_state
                 for run_state in progress.runs
-                if run_state.status
-                == RunStatus.RUNNING
-                and run_state.run_id != run_id
+                if (
+                    run_state.status
+                    == RunStatus.RUNNING
+                    and run_state.run_id != run_id
+                )
             ),
             None,
         )
@@ -740,7 +749,7 @@ def transition_progress_run(
     updated_state = transition_run_state(
         current_state,
         normalized_target_status,
-        transitioned_at_utc,
+        transition_timestamp,
         reason=reason,
     )
 
@@ -753,7 +762,7 @@ def transition_progress_run(
 
     return replace(
         progress,
-        updated_at_utc=transitioned_at_utc,
+        updated_at_utc=transition_timestamp,
         runs=updated_runs,
     )
 

@@ -530,3 +530,122 @@ The committed example configuration is:
 benchmarks/experiments/config/controlled_illumination_runner_config.example.json
 ```
 
+Copy the example configuration into the experiment output directory:
+
+```bash
+VISIONLAB_EXPERIMENT_DIRECTORY="benchmarks/results/controlled_illumination/controlled-illumination-pilot"
+
+mkdir -p "$VISIONLAB_EXPERIMENT_DIRECTORY"
+
+cp \
+benchmarks/experiments/config/controlled_illumination_runner_config.example.json \
+"$VISIONLAB_EXPERIMENT_DIRECTORY/runner_config.json"
+```
+
+Replace every placeholder command with the real runner paths for the
+selected platform.
+
+The runner configuration must contain exactly these architectures:
+
+```text
+pure_python
+hybrid
+pure_cpp
+```
+
+Each architecture defines:
+
+* `arguments`: command and arguments passed directly to the process
+* `working_directory`: process working directory
+* `environment`: optional base environment values
+* `timeout_seconds`: optional positive execution timeout
+
+Relative working directories are resolved from the repository root.
+
+The example paths are placeholders and must not be used for official
+experiments. The selected commands must execute exactly one planned
+condition. Do not configure a general benchmark runner that expands
+and executes the complete benchmark matrix.
+
+### Run environment
+
+The orchestrator passes the selected condition to the architecture
+runner through environment variables:
+
+```text
+VISIONLAB_EXPERIMENT_ID
+VISIONLAB_RUN_ID
+VISIONLAB_EXECUTION_ORDER
+VISIONLAB_PHASE
+VISIONLAB_PLATFORM
+VISIONLAB_ARCHITECTURE
+VISIONLAB_ALGORITHM
+VISIONLAB_RESOLUTION_WIDTH
+VISIONLAB_RESOLUTION_HEIGHT
+VISIONLAB_TRIAL_NUMBER
+VISIONLAB_INCIDENCE_ANGLE_DEGREES
+VISIONLAB_TARGET_ILLUMINANCE_LUX
+VISIONLAB_SOURCE_OUTPUT_SETTING
+VISIONLAB_TARGET_FPS
+VISIONLAB_FRAME_DEADLINE_MS
+```
+
+Condition-specific values override matching values from the base
+runner environment.
+
+For `constant_lux` runs,
+`VISIONLAB_SOURCE_OUTPUT_SETTING` is empty. For `constant_source`
+runs, `VISIONLAB_TARGET_ILLUMINANCE_LUX` is empty.
+
+Architecture runners must validate these values before starting image
+capture or processing.
+
+### Execute the next planned run
+
+Run from the repository root:
+
+```bash
+python -m \
+benchmarks.experiments.execute_controlled_illumination_run \
+--plan path/to/run_plan.json \
+--runner-config path/to/runner_config.json
+```
+
+By default, progress is stored beside the run plan as:
+
+```text
+run_progress.json
+```
+
+A custom progress path can be selected with:
+
+```bash
+python -m \
+benchmarks.experiments.execute_controlled_illumination_run \
+--plan path/to/run_plan.json \
+--progress path/to/run_progress.json \
+--runner-config path/to/runner_config.json
+```
+
+### Exit behavior
+
+The command uses the following exit codes:
+
+* `0`: the selected run completed successfully, or no planned runs remain
+* `1`: configuration, validation or architecture-runner failure
+* `130`: execution was interrupted by the user
+
+A successful runner result transitions the selected run from
+`running` to `completed`.
+
+A non-zero runner result or execution exception transitions the run
+to `failed` and records the failure reason.
+
+When the user interrupts execution with `Ctrl+C`, the run is atomically
+marked as `failed` before the command exits with code `130`. The run can
+then be returned to `planned` status with the run-tracking CLI before
+being attempted again.
+
+Generated progress files and local runner configurations are
+experiment artifacts. Archive them together with the run plan,
+environment metadata and result files, but do not commit them to Git.

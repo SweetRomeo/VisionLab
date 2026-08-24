@@ -490,6 +490,34 @@ class ExecuteControlledIlluminationRunTests(
 
         self.assertEqual(exit_code, 130)
 
+    def test_example_runner_configuration_is_valid(
+            self,
+    ) -> None:
+        config_path = (
+                Path(__file__).resolve().parents[1]
+                / "config"
+                / (
+                    "controlled_illumination_"
+                    "runner_config.example.json"
+                )
+        )
+
+        registry = load_runner_registry(
+            config_path
+        )
+
+        for architecture in (
+                "pure_python",
+                "hybrid",
+                "pure_cpp",
+        ):
+            self.assertTrue(
+                callable(
+                    registry.get_runner(
+                        architecture
+                    )
+                )
+            )
 
 if __name__ == "__main__":
     unittest.main()

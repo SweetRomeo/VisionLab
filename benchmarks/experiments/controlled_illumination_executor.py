@@ -351,6 +351,10 @@ def execute_next_planned_run(
     if planned_run is None:
         return None
 
+    runner = runner_registry.get_runner(
+        planned_run.architecture
+    )
+
     running_progress = transition_progress_run(
         progress,
         planned_run.run_id,
@@ -360,10 +364,6 @@ def execute_next_planned_run(
 
     persist_progress(
         running_progress
-    )
-
-    runner = runner_registry.get_runner(
-        planned_run.architecture
     )
 
     try:

@@ -504,3 +504,29 @@ status
 ```
 
 Generated `run_progress.json` files are experiment artifacts and must not be committed to Git.
+
+## Controlled-illumination execution orchestrator
+
+The execution orchestrator connects a generated run-plan manifest to
+the architecture-specific experiment runners.
+
+Each invocation:
+
+1. Loads and validates `run_plan.json`.
+2. Loads or creates `run_progress.json`.
+3. Selects the next run with `planned` status.
+4. Atomically marks the selected run as `running`.
+5. Executes the command configured for its architecture.
+6. Atomically records the run as `completed` or `failed`.
+
+Only one planned run is executed per invocation. Repeated invocations
+continue according to the manifest's `execution_order`.
+
+### Runner configuration
+
+The committed example configuration is:
+
+```text
+benchmarks/experiments/config/controlled_illumination_runner_config.example.json
+```
+

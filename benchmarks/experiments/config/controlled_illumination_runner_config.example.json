@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "runners": {
+    "pure_python": {
+      "arguments": [
+        "path/to/pure-python-interpreter",
+        "path/to/pure-python-controlled-runner.py"
+      ],
+      "working_directory": ".",
+      "environment": {},
+      "timeout_seconds": 3600
+    },
+    "hybrid": {
+      "arguments": [
+        "path/to/hybrid-python-interpreter",
+        "path/to/hybrid-controlled-runner.py"
+      ],
+      "working_directory": ".",
+      "environment": {},
+      "timeout_seconds": 3600
+    },
+    "pure_cpp": {
+      "arguments": [
+        "path/to/VisionLabCppControlledIllumination"
+      ],
+      "working_directory": ".",
+      "environment": {},
+      "timeout_seconds": 3600
+    }
+  }
+}

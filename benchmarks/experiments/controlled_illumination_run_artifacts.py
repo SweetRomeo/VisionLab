@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-import csv
-from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
@@ -19,6 +17,11 @@ from benchmarks.experiments.controlled_illumination_metadata import (
 from benchmarks.experiments.controlled_illumination_runner_context import (
     ControlledIlluminationRunnerContext,
 )
+from benchmarks.realtime.realtime_records import (
+    FrameStatus,
+    RealtimeFrameRecord,
+    write_frame_records,
+)
 
 
 FRAME_RESULTS_FILE_NAME = (
@@ -28,377 +31,11 @@ EXECUTION_SUMMARY_FILE_NAME = (
     "execution_summary.json"
 )
 
-SUPPORTED_FRAME_OUTCOMES = frozenset(
-    {
-        "processed",
-        "dropped",
-        "skipped",
-    }
-)
-
-FRAME_RESULT_FIELDS = [
-    "frame_index",
-    "outcome",
-    "captured_at_ms",
-    "processing_started_at_ms",
-    "processing_finished_at_ms",
-    "processing_time_ms",
-    "end_to_end_latency_ms",
-    "frame_deadline_ms",
-    "deadline_met",
-    "reason",
-]
-
 
 class ControlledIlluminationArtifactError(
     ValueError
 ):
-    """Raised when run artifacts are invalid."""
-
-
-def require_finite_artifact_number(
-    value: Any,
-    field_name: str,
-    *,
-    non_negative: bool = False,
-    positive: bool = False,
-) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(value)
-    ):
-        raise ControlledIlluminationArtifactError(
-            f"{field_name} must be a finite number."
-        )
-
-    numeric_value = float(value)
-
-    if non_negative and numeric_value < 0.0:
-        raise ControlledIlluminationArtifactError(
-            f"{field_name} must be non-negative."
-        )
-
-    if positive and numeric_value <= 0.0:
-        raise ControlledIlluminationArtifactError(
-            f"{field_name} must be positive."
-        )
-
-    return numeric_value
-
-
-def validate_optional_artifact_number(
-    value: Any,
-    field_name: str,
-) -> float | None:
-    if value is None:
-        return None
-
-    return require_finite_artifact_number(
-        value,
-        field_name,
-        non_negative=True,
-    )
-
-
-def validate_optional_reason(
-    value: Any,
-    field_name: str,
-) -> str | None:
-    if value is None:
-        return None
-
-    if not isinstance(value, str) or not value.strip():
-        raise ControlledIlluminationArtifactError(
-            f"{field_name} must be a non-empty string."
-        )
-
-    return value.strip()
-
-
-@dataclass(frozen=True)
-class ControlledIlluminationFrameRecord:
-    frame_index: int
-    outcome: str
-    captured_at_ms: float
-    processing_started_at_ms: float | None
-    processing_finished_at_ms: float | None
-    processing_time_ms: float | None
-    end_to_end_latency_ms: float | None
-    frame_deadline_ms: float
-    deadline_met: bool
-    reason: str | None = None
-
-    def __post_init__(self) -> None:
-        if (
-            isinstance(self.frame_index, bool)
-            or not isinstance(self.frame_index, int)
-            or self.frame_index < 0
-        ):
-            raise ControlledIlluminationArtifactError(
-                "frame_index must be a "
-                "non-negative integer."
-            )
-
-        if self.outcome not in (
-            SUPPORTED_FRAME_OUTCOMES
-        ):
-            raise ControlledIlluminationArtifactError(
-                f"Unsupported frame outcome: {self.outcome}"
-            )
-
-        captured_at_ms = (
-            require_finite_artifact_number(
-                self.captured_at_ms,
-                "captured_at_ms",
-                non_negative=True,
-            )
-        )
-        frame_deadline_ms = (
-            require_finite_artifact_number(
-                self.frame_deadline_ms,
-                "frame_deadline_ms",
-                positive=True,
-            )
-        )
-
-        processing_started_at_ms = (
-            validate_optional_artifact_number(
-                self.processing_started_at_ms,
-                "processing_started_at_ms",
-            )
-        )
-        processing_finished_at_ms = (
-            validate_optional_artifact_number(
-                self.processing_finished_at_ms,
-                "processing_finished_at_ms",
-            )
-        )
-        processing_time_ms = (
-            validate_optional_artifact_number(
-                self.processing_time_ms,
-                "processing_time_ms",
-            )
-        )
-        end_to_end_latency_ms = (
-            validate_optional_artifact_number(
-                self.end_to_end_latency_ms,
-                "end_to_end_latency_ms",
-            )
-        )
-        reason = validate_optional_reason(
-            self.reason,
-            "reason",
-        )
-
-        if not isinstance(self.deadline_met, bool):
-            raise ControlledIlluminationArtifactError(
-                "deadline_met must be boolean."
-            )
-
-        if self.outcome == "processed":
-            required_timings = {
-                "processing_started_at_ms": (
-                    processing_started_at_ms
-                ),
-                "processing_finished_at_ms": (
-                    processing_finished_at_ms
-                ),
-                "processing_time_ms": (
-                    processing_time_ms
-                ),
-                "end_to_end_latency_ms": (
-                    end_to_end_latency_ms
-                ),
-            }
-
-            missing_timings = [
-                field_name
-                for field_name, field_value
-                in required_timings.items()
-                if field_value is None
-            ]
-
-            if missing_timings:
-                raise ControlledIlluminationArtifactError(
-                    "Processed frames require timing "
-                    f"values: {missing_timings}"
-                )
-
-            assert processing_started_at_ms is not None
-            assert processing_finished_at_ms is not None
-            assert processing_time_ms is not None
-            assert end_to_end_latency_ms is not None
-
-            if (
-                processing_started_at_ms
-                < captured_at_ms
-            ):
-                raise ControlledIlluminationArtifactError(
-                    "Processing cannot start before "
-                    "frame capture."
-                )
-
-            if (
-                processing_finished_at_ms
-                < processing_started_at_ms
-            ):
-                raise ControlledIlluminationArtifactError(
-                    "Processing cannot finish before "
-                    "it starts."
-                )
-
-            measured_processing_time = (
-                processing_finished_at_ms
-                - processing_started_at_ms
-            )
-
-            if not math.isclose(
-                processing_time_ms,
-                measured_processing_time,
-                rel_tol=1e-6,
-                abs_tol=1e-3,
-            ):
-                raise ControlledIlluminationArtifactError(
-                    "processing_time_ms does not match "
-                    "the processing timestamps."
-                )
-
-            if (
-                end_to_end_latency_ms
-                + 1e-3
-                < processing_time_ms
-            ):
-                raise ControlledIlluminationArtifactError(
-                    "end_to_end_latency_ms cannot be "
-                    "shorter than processing_time_ms."
-                )
-
-            expected_deadline_met = (
-                end_to_end_latency_ms
-                <= frame_deadline_ms
-            )
-
-            if self.deadline_met != expected_deadline_met:
-                raise ControlledIlluminationArtifactError(
-                    "deadline_met does not match the "
-                    "recorded latency and deadline."
-                )
-
-            if reason is not None:
-                raise ControlledIlluminationArtifactError(
-                    "Processed frames must not define "
-                    "a reason."
-                )
-        else:
-            if any(
-                value is not None
-                for value in (
-                    processing_started_at_ms,
-                    processing_finished_at_ms,
-                    processing_time_ms,
-                    end_to_end_latency_ms,
-                )
-            ):
-                raise ControlledIlluminationArtifactError(
-                    "Dropped or skipped frames must not "
-                    "contain processing timings."
-                )
-
-            if self.deadline_met:
-                raise ControlledIlluminationArtifactError(
-                    "Dropped or skipped frames cannot "
-                    "meet the deadline."
-                )
-
-            if reason is None:
-                raise ControlledIlluminationArtifactError(
-                    "Dropped or skipped frames require "
-                    "a reason."
-                )
-
-        object.__setattr__(
-            self,
-            "captured_at_ms",
-            captured_at_ms,
-        )
-        object.__setattr__(
-            self,
-            "processing_started_at_ms",
-            processing_started_at_ms,
-        )
-        object.__setattr__(
-            self,
-            "processing_finished_at_ms",
-            processing_finished_at_ms,
-        )
-        object.__setattr__(
-            self,
-            "processing_time_ms",
-            processing_time_ms,
-        )
-        object.__setattr__(
-            self,
-            "end_to_end_latency_ms",
-            end_to_end_latency_ms,
-        )
-        object.__setattr__(
-            self,
-            "frame_deadline_ms",
-            frame_deadline_ms,
-        )
-        object.__setattr__(
-            self,
-            "reason",
-            reason,
-        )
-
-    def to_csv_row(self) -> dict[str, object]:
-        def serialize_optional_number(
-            value: float | None,
-        ) -> str:
-            return (
-                ""
-                if value is None
-                else f"{value:.6f}"
-            )
-
-        return {
-            "frame_index": self.frame_index,
-            "outcome": self.outcome,
-            "captured_at_ms": (
-                f"{self.captured_at_ms:.6f}"
-            ),
-            "processing_started_at_ms": (
-                serialize_optional_number(
-                    self.processing_started_at_ms
-                )
-            ),
-            "processing_finished_at_ms": (
-                serialize_optional_number(
-                    self.processing_finished_at_ms
-                )
-            ),
-            "processing_time_ms": (
-                serialize_optional_number(
-                    self.processing_time_ms
-                )
-            ),
-            "end_to_end_latency_ms": (
-                serialize_optional_number(
-                    self.end_to_end_latency_ms
-                )
-            ),
-            "frame_deadline_ms": (
-                f"{self.frame_deadline_ms:.6f}"
-            ),
-            "deadline_met": (
-                "true"
-                if self.deadline_met
-                else "false"
-            ),
-            "reason": self.reason or "",
-        }
+    """Raised when controlled-run artifacts are invalid."""
 
 
 def parse_artifact_timestamp(
@@ -421,10 +58,18 @@ def parse_artifact_timestamp(
 
 
 def validate_frame_records(
-    records: Sequence[
-        ControlledIlluminationFrameRecord
-    ],
-) -> tuple[ControlledIlluminationFrameRecord, ...]:
+    context: ControlledIlluminationRunnerContext,
+    records: Sequence[RealtimeFrameRecord],
+) -> tuple[RealtimeFrameRecord, ...]:
+    if not isinstance(
+        context,
+        ControlledIlluminationRunnerContext,
+    ):
+        raise ControlledIlluminationArtifactError(
+            "context must be "
+            "ControlledIlluminationRunnerContext."
+        )
+
     if (
         isinstance(records, (str, bytes))
         or not isinstance(records, Sequence)
@@ -437,30 +82,76 @@ def validate_frame_records(
     normalized_records = tuple(records)
 
     if not all(
-        isinstance(
-            record,
-            ControlledIlluminationFrameRecord,
-        )
+        isinstance(record, RealtimeFrameRecord)
         for record in normalized_records
     ):
         raise ControlledIlluminationArtifactError(
-            "Every record must be "
-            "ControlledIlluminationFrameRecord."
+            "Every record must be RealtimeFrameRecord."
         )
 
+    expected_indices = list(
+        range(1, len(normalized_records) + 1)
+    )
     actual_indices = [
         record.frame_index
         for record in normalized_records
     ]
-    expected_indices = list(
-        range(len(normalized_records))
-    )
 
     if actual_indices != expected_indices:
         raise ControlledIlluminationArtifactError(
             "Frame indices must be sequential "
-            "and start at zero."
+            "and start at one."
         )
+
+    expected_resolution = (
+        f"{context.resolution.width}"
+        f"x{context.resolution.height}"
+    )
+    expected_trial = (
+        context.planned_run.trial_number
+    )
+    expected_deadline_ms = (
+        context.planned_run.frame_deadline_ms
+    )
+
+    for record in normalized_records:
+        if (
+            record.architecture
+            != context.architecture
+        ):
+            raise ControlledIlluminationArtifactError(
+                "Frame architecture does not match "
+                "the planned run."
+            )
+
+        if record.algorithm != context.algorithm:
+            raise ControlledIlluminationArtifactError(
+                "Frame algorithm does not match "
+                "the planned run."
+            )
+
+        if record.resolution != expected_resolution:
+            raise ControlledIlluminationArtifactError(
+                "Frame resolution does not match "
+                "the planned run."
+            )
+
+        if record.trial != expected_trial:
+            raise ControlledIlluminationArtifactError(
+                "Frame trial does not match "
+                "the planned run."
+            )
+
+        if not math.isclose(
+            record.deadline_ms,
+            expected_deadline_ms,
+            rel_tol=1e-9,
+            abs_tol=1e-6,
+        ):
+            raise ControlledIlluminationArtifactError(
+                "Frame deadline does not match "
+                "the planned run."
+            )
 
     return normalized_records
 
@@ -518,7 +209,7 @@ def write_json_atomic(
 
 def write_frame_results_atomic(
     records: tuple[
-        ControlledIlluminationFrameRecord,
+        RealtimeFrameRecord,
         ...,
     ],
     output_path: Path,
@@ -526,25 +217,23 @@ def write_frame_results_atomic(
     temporary_path = output_path.with_name(
         f".{output_path.name}."
         f"{uuid4().hex}.tmp"
+        f"{output_path.suffix}"
     )
 
     try:
-        with temporary_path.open(
-            "w",
-            newline="",
-            encoding="utf-8",
-        ) as output_file:
-            writer = csv.DictWriter(
-                output_file,
-                fieldnames=FRAME_RESULT_FIELDS,
+        written_record_count = write_frame_records(
+            records,
+            temporary_path,
+        )
+
+        if written_record_count != len(records):
+            raise ControlledIlluminationArtifactError(
+                "Not all frame records were written."
             )
-            writer.writeheader()
 
-            for record in records:
-                writer.writerow(
-                    record.to_csv_row()
-                )
-
+        with temporary_path.open(
+            "r+b"
+        ) as output_file:
             output_file.flush()
             os.fsync(output_file.fileno())
 
@@ -562,25 +251,15 @@ def write_frame_results_atomic(
 
 def write_completed_run_artifacts_atomic(
     context: ControlledIlluminationRunnerContext,
-    records: Sequence[
-        ControlledIlluminationFrameRecord
-    ],
+    records: Sequence[RealtimeFrameRecord],
     *,
     started_at_utc: str,
     finished_at_utc: str,
     warmup_frame_count: int,
 ) -> tuple[Path, Path]:
-    if not isinstance(
-        context,
-        ControlledIlluminationRunnerContext,
-    ):
-        raise ControlledIlluminationArtifactError(
-            "context must be "
-            "ControlledIlluminationRunnerContext."
-        )
-
     normalized_records = validate_frame_records(
-        records
+        context,
+        records,
     )
 
     if (
@@ -637,24 +316,29 @@ def write_completed_run_artifacts_atomic(
     processed_records = [
         record
         for record in normalized_records
-        if record.outcome == "processed"
+        if (
+            record.frame_status
+            == FrameStatus.PROCESSED
+        )
     ]
     dropped_count = sum(
-        record.outcome == "dropped"
+        record.frame_status == FrameStatus.DROPPED
         for record in normalized_records
     )
     skipped_count = sum(
-        record.outcome == "skipped"
+        record.frame_status == FrameStatus.SKIPPED
         for record in normalized_records
     )
     deadline_met_count = sum(
-        record.outcome == "processed"
-        and record.deadline_met
+        record.frame_status
+        == FrameStatus.PROCESSED
+        and record.deadline_missed is False
         for record in normalized_records
     )
     deadline_miss_count = sum(
-        record.outcome == "processed"
-        and not record.deadline_met
+        record.frame_status
+        == FrameStatus.PROCESSED
+        and record.deadline_missed is True
         for record in normalized_records
     )
 
@@ -729,8 +413,7 @@ def write_completed_run_artifacts_atomic(
         ),
     }
 
-    # The summary is written last. Its presence indicates
-    # that the complete artifact set was finalized.
+    # Written last: its presence marks a complete run.
     write_json_atomic(
         summary,
         summary_path,

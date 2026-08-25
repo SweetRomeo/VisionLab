@@ -8,7 +8,6 @@ import unittest
 
 from benchmarks.experiments.controlled_illumination_run_artifacts import (
     ControlledIlluminationArtifactError,
-    ControlledIlluminationFrameRecord,
     calculate_file_sha256,
     validate_frame_records,
     write_completed_run_artifacts_atomic,
@@ -16,10 +15,18 @@ from benchmarks.experiments.controlled_illumination_run_artifacts import (
 from benchmarks.experiments.controlled_illumination_runner_context import (
     load_runner_context_from_environment,
 )
+from benchmarks.realtime.realtime_records import (
+    RealtimeRunContext,
+    create_dropped_record,
+    create_processed_record,
+    create_skipped_record,
+)
 
 
 STARTED_AT = "2026-08-24T10:00:00Z"
 FINISHED_AT = "2026-08-24T10:01:00Z"
+ORIGIN_TIMESTAMP_NS = 1_000_000_000
+DEADLINE_MS = 33.333333
 
 
 class ControlledIlluminationRunArtifactTests(
@@ -53,8 +60,8 @@ class ControlledIlluminationRunArtifactTests(
             ),
             "VISIONLAB_SOURCE_OUTPUT_SETTING": "",
             "VISIONLAB_TARGET_FPS": "30",
-            "VISIONLAB_FRAME_DEADLINE_MS": (
-                "33.333333"
+            "VISIONLAB_FRAME_DEADLINE_MS": str(
+                DEADLINE_MS
             ),
             "VISIONLAB_RESULTS_ROOT": str(
                 results_root
@@ -66,192 +73,254 @@ class ControlledIlluminationRunArtifactTests(
             expected_architecture="pure_python",
         )
 
-    def create_processed_record(
+    def create_realtime_context(
         self,
-        frame_index: int = 0,
         *,
-        captured_at_ms: float = 0.0,
-        processing_started_at_ms: float = 1.0,
-        processing_finished_at_ms: float = 4.0,
-        processing_time_ms: float = 3.0,
-        end_to_end_latency_ms: float = 4.0,
-        frame_deadline_ms: float = 33.333333,
-        deadline_met: bool = True,
-    ) -> ControlledIlluminationFrameRecord:
-        return ControlledIlluminationFrameRecord(
-            frame_index=frame_index,
-            outcome="processed",
-            captured_at_ms=captured_at_ms,
-            processing_started_at_ms=(
-                processing_started_at_ms
+        architecture: str = "pure_python",
+        algorithm: str = "original",
+        resolution: str = "640x480",
+        trial: int = 1,
+        deadline_ms: float = DEADLINE_MS,
+    ) -> RealtimeRunContext:
+        return RealtimeRunContext(
+            architecture=architecture,
+            algorithm=algorithm,
+            resolution=resolution,
+            trial=trial,
+            origin_timestamp_ns=(
+                ORIGIN_TIMESTAMP_NS
             ),
-            processing_finished_at_ms=(
-                processing_finished_at_ms
-            ),
-            processing_time_ms=processing_time_ms,
-            end_to_end_latency_ms=(
-                end_to_end_latency_ms
-            ),
-            frame_deadline_ms=frame_deadline_ms,
-            deadline_met=deadline_met,
+            deadline_ms=deadline_ms,
         )
 
-    def create_dropped_record(
+    def create_records(
         self,
-        frame_index: int,
-    ) -> ControlledIlluminationFrameRecord:
-        return ControlledIlluminationFrameRecord(
-            frame_index=frame_index,
-            outcome="dropped",
-            captured_at_ms=66.0,
-            processing_started_at_ms=None,
-            processing_finished_at_ms=None,
-            processing_time_ms=None,
-            end_to_end_latency_ms=None,
-            frame_deadline_ms=33.333333,
-            deadline_met=False,
-            reason="queue_capacity_exceeded",
+        realtime_context: (
+            RealtimeRunContext | None
+        ) = None,
+    ):
+        active_context = (
+            realtime_context
+            if realtime_context is not None
+            else self.create_realtime_context()
         )
 
-    def create_skipped_record(
-        self,
-        frame_index: int,
-    ) -> ControlledIlluminationFrameRecord:
-        return ControlledIlluminationFrameRecord(
-            frame_index=frame_index,
-            outcome="skipped",
-            captured_at_ms=99.0,
-            processing_started_at_ms=None,
-            processing_finished_at_ms=None,
-            processing_time_ms=None,
-            end_to_end_latency_ms=None,
-            frame_deadline_ms=33.333333,
-            deadline_met=False,
-            reason="frame_unavailable",
+        return (
+            create_processed_record(
+                active_context,
+                frame_index=1,
+                scheduled_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                ),
+                enqueued_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                ),
+                processing_start_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 1_000_000
+                ),
+                processing_end_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 4_000_000
+                ),
+            ),
+            create_processed_record(
+                active_context,
+                frame_index=2,
+                scheduled_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 40_000_000
+                ),
+                enqueued_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 40_000_000
+                ),
+                processing_start_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 41_000_000
+                ),
+                processing_end_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 81_000_000
+                ),
+            ),
+            create_dropped_record(
+                active_context,
+                frame_index=3,
+                scheduled_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 80_000_000
+                ),
+                enqueued_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 81_000_000
+                ),
+                drop_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 82_000_000
+                ),
+            ),
+            create_skipped_record(
+                active_context,
+                frame_index=4,
+                scheduled_timestamp_ns=(
+                    ORIGIN_TIMESTAMP_NS
+                    + 120_000_000
+                ),
+            ),
         )
 
-    def test_valid_processed_record(
+    def test_valid_records_are_accepted(
         self,
     ) -> None:
-        record = self.create_processed_record()
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records()
+
+            validated_records = (
+                validate_frame_records(
+                    context,
+                    records,
+                )
+            )
 
         self.assertEqual(
-            record.outcome,
-            "processed",
-        )
-        self.assertTrue(record.deadline_met)
-
-    def test_valid_dropped_record(
-        self,
-    ) -> None:
-        record = self.create_dropped_record(0)
-
-        self.assertEqual(
-            record.reason,
-            "queue_capacity_exceeded",
-        )
-        self.assertFalse(record.deadline_met)
-
-    def test_processed_record_requires_timings(
-        self,
-    ) -> None:
-        with self.assertRaisesRegex(
-            ControlledIlluminationArtifactError,
-            "require timing",
-        ):
-            ControlledIlluminationFrameRecord(
-                frame_index=0,
-                outcome="processed",
-                captured_at_ms=0.0,
-                processing_started_at_ms=None,
-                processing_finished_at_ms=None,
-                processing_time_ms=None,
-                end_to_end_latency_ms=None,
-                frame_deadline_ms=33.333333,
-                deadline_met=False,
-            )
-
-    def test_processing_duration_mismatch_is_rejected(
-        self,
-    ) -> None:
-        with self.assertRaisesRegex(
-            ControlledIlluminationArtifactError,
-            "does not match",
-        ):
-            self.create_processed_record(
-                processing_time_ms=10.0,
-            )
-
-    def test_deadline_mismatch_is_rejected(
-        self,
-    ) -> None:
-        with self.assertRaisesRegex(
-            ControlledIlluminationArtifactError,
-            "deadline_met",
-        ):
-            self.create_processed_record(
-                processing_finished_at_ms=41.0,
-                processing_time_ms=40.0,
-                end_to_end_latency_ms=41.0,
-                deadline_met=True,
-            )
-
-    def test_dropped_record_rejects_timings(
-        self,
-    ) -> None:
-        with self.assertRaisesRegex(
-            ControlledIlluminationArtifactError,
-            "must not contain processing timings",
-        ):
-            ControlledIlluminationFrameRecord(
-                frame_index=0,
-                outcome="dropped",
-                captured_at_ms=0.0,
-                processing_started_at_ms=1.0,
-                processing_finished_at_ms=None,
-                processing_time_ms=None,
-                end_to_end_latency_ms=None,
-                frame_deadline_ms=33.333333,
-                deadline_met=False,
-                reason="queue_capacity_exceeded",
-            )
-
-    def test_dropped_record_requires_reason(
-        self,
-    ) -> None:
-        with self.assertRaisesRegex(
-            ControlledIlluminationArtifactError,
-            "require a reason",
-        ):
-            ControlledIlluminationFrameRecord(
-                frame_index=0,
-                outcome="dropped",
-                captured_at_ms=0.0,
-                processing_started_at_ms=None,
-                processing_finished_at_ms=None,
-                processing_time_ms=None,
-                end_to_end_latency_ms=None,
-                frame_deadline_ms=33.333333,
-                deadline_met=False,
-            )
-
-    def test_non_sequential_indices_are_rejected(
-        self,
-    ) -> None:
-        records = (
-            self.create_processed_record(
-                frame_index=0
-            ),
-            self.create_dropped_record(
-                frame_index=2
-            ),
+            validated_records,
+            records,
         )
 
-        with self.assertRaisesRegex(
-            ControlledIlluminationArtifactError,
-            "sequential",
-        ):
-            validate_frame_records(records)
+    def test_non_sequential_indices_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records()
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "sequential",
+            ):
+                validate_frame_records(
+                    context,
+                    (
+                        records[0],
+                        records[2],
+                    ),
+                )
+
+    def test_architecture_mismatch_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records(
+                self.create_realtime_context(
+                    architecture="hybrid"
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "architecture",
+            ):
+                validate_frame_records(
+                    context,
+                    records,
+                )
+
+    def test_algorithm_mismatch_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records(
+                self.create_realtime_context(
+                    algorithm="clahe"
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "algorithm",
+            ):
+                validate_frame_records(
+                    context,
+                    records,
+                )
+
+    def test_resolution_mismatch_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records(
+                self.create_realtime_context(
+                    resolution="1280x720"
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "resolution",
+            ):
+                validate_frame_records(
+                    context,
+                    records,
+                )
+
+    def test_trial_mismatch_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records(
+                self.create_realtime_context(
+                    trial=2
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "trial",
+            ):
+                validate_frame_records(
+                    context,
+                    records,
+                )
+
+    def test_deadline_mismatch_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records(
+                self.create_realtime_context(
+                    deadline_ms=20.0
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "deadline",
+            ):
+                validate_frame_records(
+                    context,
+                    records,
+                )
 
     def test_completed_artifacts_are_written(
         self,
@@ -260,27 +329,7 @@ class ControlledIlluminationRunArtifactTests(
             context = self.create_context(
                 Path(temporary)
             )
-
-            records = (
-                self.create_processed_record(
-                    frame_index=0,
-                ),
-                self.create_processed_record(
-                    frame_index=1,
-                    captured_at_ms=40.0,
-                    processing_started_at_ms=41.0,
-                    processing_finished_at_ms=81.0,
-                    processing_time_ms=40.0,
-                    end_to_end_latency_ms=41.0,
-                    deadline_met=False,
-                ),
-                self.create_dropped_record(
-                    frame_index=2
-                ),
-                self.create_skipped_record(
-                    frame_index=3
-                ),
-            )
+            records = self.create_records()
 
             csv_path, summary_path = (
                 write_completed_run_artifacts_atomic(
@@ -372,9 +421,7 @@ class ControlledIlluminationRunArtifactTests(
             context = self.create_context(
                 Path(temporary)
             )
-            records = (
-                self.create_processed_record(),
-            )
+            records = self.create_records()
 
             write_completed_run_artifacts_atomic(
                 context,
@@ -410,12 +457,30 @@ class ControlledIlluminationRunArtifactTests(
             ):
                 write_completed_run_artifacts_atomic(
                     context,
-                    (
-                        self.create_processed_record(),
-                    ),
+                    self.create_records(),
                     started_at_utc=FINISHED_AT,
                     finished_at_utc=STARTED_AT,
                     warmup_frame_count=30,
+                )
+
+    def test_invalid_warmup_count_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationArtifactError,
+                "warmup_frame_count",
+            ):
+                write_completed_run_artifacts_atomic(
+                    context,
+                    self.create_records(),
+                    started_at_utc=STARTED_AT,
+                    finished_at_utc=FINISHED_AT,
+                    warmup_frame_count=-1,
                 )
 
 

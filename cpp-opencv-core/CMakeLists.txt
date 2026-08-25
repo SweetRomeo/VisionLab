@@ -152,8 +152,6 @@ if(WIN32)
         "${OPENCV_RUNTIME_DIR}/*.dll"
     )
 
-    # Do not copy Debug OpenCV DLLs into Release output.
-
     if(OPENCV_RUNTIME_DLLS)
         add_custom_command(
             TARGET VisionLabCore

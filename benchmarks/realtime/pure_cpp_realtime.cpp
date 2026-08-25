@@ -95,6 +95,212 @@ struct ExperimentPlan {
     RealtimeConfiguration realtime;
 };
 
+std::optional<std::string> readOptionalEnvironmentVariable(
+    const char *variableName
+)
+{
+    const char *value = std::getenv(variableName);
+
+    if (value == nullptr || std::string(value).empty()) {
+        return std::nullopt;
+    }
+
+    return std::string(value);
+}
+
+std::string requireEnvironmentVariable(
+    const char *variableName
+)
+{
+    const std::optional<std::string> value =
+        readOptionalEnvironmentVariable(
+            variableName
+        );
+
+    if (!value.has_value()) {
+        throw std::runtime_error(
+            std::string(
+                "Required environment variable is missing: "
+            )
+            + variableName
+        );
+    }
+
+    return *value;
+}
+
+int parsePositiveEnvironmentInteger(
+    const char *variableName
+)
+{
+    const std::string text =
+        requireEnvironmentVariable(
+            variableName
+        );
+
+    try {
+        std::size_t parsedCharacterCount = 0;
+        const int value = std::stoi(
+            text,
+            &parsedCharacterCount
+        );
+
+        if (
+            parsedCharacterCount != text.size()
+            || value <= 0
+        ) {
+            throw std::runtime_error(
+                std::string(
+                    "Environment variable must be a "
+                    "positive integer: "
+                )
+                + variableName
+            );
+        }
+
+        return value;
+    } catch (
+        const std::invalid_argument &
+    ) {
+        throw std::runtime_error(
+            std::string(
+                "Environment variable must be a "
+                "positive integer: "
+            )
+            + variableName
+        );
+    } catch (
+        const std::out_of_range &
+    ) {
+        throw std::runtime_error(
+            std::string(
+                "Environment variable is outside the "
+                "supported integer range: "
+            )
+            + variableName
+        );
+    }
+}
+
+bool controlledIlluminationRunRequested()
+{
+    return readOptionalEnvironmentVariable(
+        "VISIONLAB_RUN_ID"
+    ).has_value();
+}
+
+double parsePositiveEnvironmentNumber(
+    const char *variableName
+)
+{
+    const std::string text =
+        requireEnvironmentVariable(
+            variableName
+        );
+
+    try {
+        std::size_t parsedCharacterCount = 0;
+        const double value = std::stod(
+            text,
+            &parsedCharacterCount
+        );
+
+        if (
+            parsedCharacterCount != text.size()
+            || !std::isfinite(value)
+            || value <= 0.0
+        ) {
+            throw std::runtime_error(
+                std::string(
+                    "Environment variable must be a "
+                    "positive finite number: "
+                )
+                + variableName
+            );
+        }
+
+        return value;
+    } catch (
+        const std::invalid_argument &
+    ) {
+        throw std::runtime_error(
+            std::string(
+                "Environment variable must be a "
+                "positive finite number: "
+            )
+            + variableName
+        );
+    } catch (
+        const std::out_of_range &
+    ) {
+        throw std::runtime_error(
+            std::string(
+                "Environment variable is outside the "
+                "supported numeric range: "
+            )
+            + variableName
+        );
+    }
+}
+
+const Resolution &findPlannedResolution(
+    const ExperimentPlan &plan,
+    int width,
+    int height
+)
+{
+    const auto resolutionIterator = std::find_if(
+        plan.resolutions.begin(),
+        plan.resolutions.end(),
+        [width, height](
+            const Resolution &resolution
+        ) {
+            return (
+                resolution.width == width
+                && resolution.height == height
+            );
+        }
+    );
+
+    if (resolutionIterator == plan.resolutions.end()) {
+        throw std::runtime_error(
+            "The controlled-illumination resolution "
+            "is not present in the experiment plan: "
+            + std::to_string(width)
+            + "x"
+            + std::to_string(height)
+        );
+    }
+
+    return *resolutionIterator;
+}
+
+const AlgorithmConfiguration &findPlannedAlgorithm(
+    const ExperimentPlan &plan,
+    const std::string &algorithmName
+)
+{
+    const auto algorithmIterator = std::find_if(
+        plan.algorithms.begin(),
+        plan.algorithms.end(),
+        [&algorithmName](
+            const AlgorithmConfiguration &algorithm
+        ) {
+            return algorithm.name == algorithmName;
+        }
+    );
+
+    if (algorithmIterator == plan.algorithms.end()) {
+        throw std::runtime_error(
+            "The controlled-illumination algorithm "
+            "is not present in the experiment plan: "
+            + algorithmName
+        );
+    }
+
+    return *algorithmIterator;
+}
+
 struct ScheduledFrame {
     int sequenceIndex{};
     TimePoint scheduledTimestamp;
@@ -1221,6 +1427,174 @@ void writeFrameRecords(
 
 } // namespace
 
+void runControlledIlluminationTrial(
+    const ExperimentPlan &plan
+)
+{
+    const std::string architecture =
+        requireEnvironmentVariable(
+            "VISIONLAB_ARCHITECTURE"
+        );
+
+    if (architecture != "pure_cpp") {
+        throw std::runtime_error(
+            "VisionLabCppRealtime controlled mode "
+            "requires architecture=pure_cpp."
+        );
+    }
+
+    const std::string algorithmName =
+        requireEnvironmentVariable(
+            "VISIONLAB_ALGORITHM"
+        );
+    const int width =
+        parsePositiveEnvironmentInteger(
+            "VISIONLAB_RESOLUTION_WIDTH"
+        );
+    const int height =
+        parsePositiveEnvironmentInteger(
+            "VISIONLAB_RESOLUTION_HEIGHT"
+        );
+    const int trial =
+        parsePositiveEnvironmentInteger(
+            "VISIONLAB_TRIAL_NUMBER"
+        );
+    const double targetFps =
+        parsePositiveEnvironmentNumber(
+            "VISIONLAB_TARGET_FPS"
+        );
+    const double frameDeadlineMs =
+        parsePositiveEnvironmentNumber(
+            "VISIONLAB_FRAME_DEADLINE_MS"
+        );
+
+    if (trial > plan.realtime.trialCount) {
+        throw std::runtime_error(
+            "The controlled-illumination trial "
+            "number exceeds the configured trial count."
+        );
+    }
+
+    if (
+        std::abs(
+            targetFps
+            - plan.realtime.targetFps
+        ) > 1e-9
+    ) {
+        throw std::runtime_error(
+            "The controlled-illumination target FPS "
+            "does not match the real-time configuration."
+        );
+    }
+
+    if (
+        std::abs(
+            frameDeadlineMs
+            - plan.realtime.deadlineMilliseconds()
+        ) > 1e-6
+    ) {
+        throw std::runtime_error(
+            "The controlled-illumination frame deadline "
+            "does not match the real-time configuration."
+        );
+    }
+
+    const Resolution &resolution =
+        findPlannedResolution(
+            plan,
+            width,
+            height
+        );
+    const AlgorithmConfiguration &algorithm =
+        findPlannedAlgorithm(
+            plan,
+            algorithmName
+        );
+
+    const fs::path outputPath =
+        fs::path(
+            requireEnvironmentVariable(
+                "VISIONLAB_CPP_FRAME_RESULTS_PATH"
+            )
+        ).lexically_normal();
+
+    if (!outputPath.is_absolute()) {
+        throw std::runtime_error(
+            "VISIONLAB_CPP_FRAME_RESULTS_PATH "
+            "must be an absolute path."
+        );
+    }
+
+    if (outputPath.extension() != ".csv") {
+        throw std::runtime_error(
+            "VISIONLAB_CPP_FRAME_RESULTS_PATH "
+            "must use the .csv extension."
+        );
+    }
+
+    std::cout
+        << "Pure C++ controlled illumination | "
+        << algorithm.name << " | "
+        << resolution.name() << " | trial "
+        << trial << '/'
+        << plan.realtime.trialCount
+        << std::endl;
+
+    std::vector<FrameRecord> records =
+        runRealtimeTrial(
+            plan,
+            resolution,
+            algorithm,
+            trial
+        );
+
+    const std::size_t expectedRecordCount =
+        static_cast<std::size_t>(
+            plan.realtime.measuredFrames
+        );
+
+    if (records.size() != expectedRecordCount) {
+        throw std::runtime_error(
+            "The controlled-illumination run produced "
+            "an unexpected frame-record count."
+        );
+    }
+
+    writeFrameRecords(
+        records,
+        outputPath
+    );
+
+    const std::size_t processedCount =
+        static_cast<std::size_t>(
+            std::count_if(
+                records.begin(),
+                records.end(),
+                [](const FrameRecord &record) {
+                    return (
+                        record.frameStatus
+                        == FrameStatus::Processed
+                    );
+                }
+            )
+        );
+    const std::size_t droppedCount =
+        records.size() - processedCount;
+
+    std::cout
+        << "Pure C++ controlled-illumination "
+        << "run completed.\n"
+        << "Frame records: "
+        << records.size() << '\n'
+        << "Processed: "
+        << processedCount << '\n'
+        << "Dropped: "
+        << droppedCount << '\n'
+        << "Results: "
+        << outputPath.string()
+        << std::endl;
+}
+
 int main()
 {
 #if !VISIONLAB_REALTIME_RELEASE
@@ -1235,6 +1609,14 @@ int main()
                 .lexically_normal();
         const ExperimentPlan plan =
             loadExperimentPlan(projectRoot);
+
+        if (controlledIlluminationRunRequested()) {
+            runControlledIlluminationTrial(
+                plan
+            );
+            return 0;
+        }
+
         std::vector<FrameRecord> allRecords;
 
         const std::size_t expectedRecordCount =

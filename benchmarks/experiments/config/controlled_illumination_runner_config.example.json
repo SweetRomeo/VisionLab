@@ -4,7 +4,8 @@
     "pure_python": {
       "arguments": [
         "path/to/pure-python-interpreter",
-        "path/to/pure-python-controlled-runner.py"
+        "-m",
+        "benchmarks.experiments.controlled_illumination_pure_python_runner"
       ],
       "working_directory": ".",
       "environment": {},
@@ -13,18 +14,25 @@
     "hybrid": {
       "arguments": [
         "path/to/hybrid-python-interpreter",
-        "path/to/hybrid-controlled-runner.py"
+        "-m",
+        "benchmarks.experiments.controlled_illumination_hybrid_runner"
       ],
       "working_directory": ".",
-      "environment": {},
+      "environment": {
+        "VISIONLAB_CPP_MODULE_DIR": "path/to/hybrid-python-cpp/Release-build-directory"
+      },
       "timeout_seconds": 3600
     },
     "pure_cpp": {
       "arguments": [
-        "path/to/VisionLabCppControlledIllumination"
+        "path/to/pure-python-interpreter",
+        "-m",
+        "benchmarks.experiments.controlled_illumination_pure_cpp_runner"
       ],
       "working_directory": ".",
-      "environment": {},
+      "environment": {
+        "VISIONLAB_CPP_REALTIME_EXECUTABLE": "path/to/Release/VisionLabCppRealtime"
+      },
       "timeout_seconds": 3600
     }
   }

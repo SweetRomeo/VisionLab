@@ -530,3 +530,274 @@ The committed example configuration is:
 benchmarks/experiments/config/controlled_illumination_runner_config.example.json
 ```
 
+Copy the example configuration into the experiment output directory:
+
+```bash
+VISIONLAB_EXPERIMENT_DIRECTORY="benchmarks/results/controlled_illumination/controlled-illumination-pilot"
+
+mkdir -p "$VISIONLAB_EXPERIMENT_DIRECTORY"
+
+cp \
+benchmarks/experiments/config/controlled_illumination_runner_config.example.json \
+"$VISIONLAB_EXPERIMENT_DIRECTORY/runner_config.json"
+```
+
+Replace every placeholder command with the real runner paths for the
+selected platform.
+
+The runner configuration must contain exactly these architectures:
+
+```text
+pure_python
+hybrid
+pure_cpp
+```
+
+Each architecture defines:
+
+* `arguments`: command and arguments passed directly to the process
+* `working_directory`: process working directory
+* `environment`: optional base environment values
+* `timeout_seconds`: optional positive execution timeout
+
+Relative working directories are resolved from the repository root.
+
+The example paths are placeholders and must not be used for official
+experiments. The selected commands must execute exactly one planned
+condition. Do not configure a general benchmark runner that expands
+and executes the complete benchmark matrix.
+
+### Architecture-specific runners
+
+The repository provides one controlled-illumination entry point for
+each software architecture:
+
+| Architecture      | Runner module                                                       |
+| ----------------- | ------------------------------------------------------------------- |
+| Pure Python       | `benchmarks.experiments.controlled_illumination_pure_python_runner` |
+| Hybrid Python+C++ | `benchmarks.experiments.controlled_illumination_hybrid_runner`      |
+| Pure C++          | `benchmarks.experiments.controlled_illumination_pure_cpp_runner`    |
+
+Each entry point executes exactly one condition received from the
+orchestrator. The runners validate the selected architecture,
+algorithm, resolution, trial number, target frame rate and frame
+deadline before processing begins.
+
+#### Pure Python runner
+
+Use the Python interpreter from the Pure Python virtual environment:
+
+```json
+{
+  "arguments": [
+    "C:/path/to/VisionLab/pure-python/.venv/Scripts/python.exe",
+    "-m",
+    "benchmarks.experiments.controlled_illumination_pure_python_runner"
+  ],
+  "working_directory": ".",
+  "environment": {},
+  "timeout_seconds": 3600
+}
+```
+
+On Linux and macOS, use the corresponding virtual-environment
+interpreter:
+
+```text
+/path/to/VisionLab/pure-python/.venv/bin/python
+```
+
+#### Hybrid Python+C++ runner
+
+Use the Hybrid virtual environment and provide the directory containing
+the Release `visionlab_cpp` module:
+
+```json
+{
+  "arguments": [
+    "C:/path/to/VisionLab/hybrid-python-cpp/.venv/Scripts/python.exe",
+    "-m",
+    "benchmarks.experiments.controlled_illumination_hybrid_runner"
+  ],
+  "working_directory": ".",
+  "environment": {
+    "VISIONLAB_CPP_MODULE_DIR": "C:/path/to/VisionLab/hybrid-python-cpp/build/RELEASE_DIRECTORY"
+  },
+  "timeout_seconds": 3600
+}
+```
+
+On Linux and macOS, use the corresponding Hybrid virtual-environment
+interpreter and the directory containing the Release `visionlab_cpp`
+shared module.
+
+The Hybrid runner rejects a missing or unsuitable compiled module. All
+official Hybrid measurements must use a Release build.
+
+#### Pure C++ runner
+
+The Pure C++ entry point is a Python adapter around the Release
+`VisionLabCppRealtime` executable:
+
+```json
+{
+  "arguments": [
+    "C:/path/to/VisionLab/pure-python/.venv/Scripts/python.exe",
+    "-m",
+    "benchmarks.experiments.controlled_illumination_pure_cpp_runner"
+  ],
+  "working_directory": ".",
+  "environment": {
+    "VISIONLAB_CPP_REALTIME_EXECUTABLE": "C:/path/to/VisionLab/cpp-opencv-core/build/RELEASE_DIRECTORY/VisionLabCppRealtime.exe"
+  },
+  "timeout_seconds": 3600
+}
+```
+
+On Linux and macOS, configure the path to the Release executable
+without the `.exe` extension.
+
+The Pure C++ adapter:
+
+1. Rejects Debug executable paths.
+2. Starts `VisionLabCppRealtime` in single-condition mode.
+3. Validates the generated C++ frame-result CSV.
+4. Converts the results into the shared artifact schema.
+5. Writes the official CSV and execution summary atomically.
+
+On Windows, `Qt6Core.dll` and the required OpenCV runtime DLLs must be
+available beside `VisionLabCppRealtime.exe` or through `PATH`. The CMake
+Release build copies these runtime files into the executable directory.
+
+#### Output artifacts
+
+A successful architecture runner creates:
+
+```text
+<results-root>/
+└── <platform>/
+    └── <experiment-id>/
+        └── <run-id>/
+            ├── realtime_frame_results.csv
+            └── execution_summary.json
+```
+
+The CSV contains the shared per-frame timing, deadline and frame-status
+schema.
+
+The JSON summary is written last and acts as the completed-run marker.
+Existing completed artifacts are not silently overwritten.
+
+#### Current input-source scope
+
+The current architecture runners use the deterministic benchmark video
+to validate orchestration, timing, processing and artifact generation
+without experiment hardware.
+
+These software smoke-test results must not be interpreted as physical
+controlled-illumination measurements. Official lux- and angle-dependent
+experiments require the live-camera input adapter and calibrated
+illumination hardware.
+
+### Run environment
+
+The orchestrator passes the selected condition to the architecture
+runner through environment variables:
+
+```text
+VISIONLAB_EXPERIMENT_ID
+VISIONLAB_RUN_ID
+VISIONLAB_EXECUTION_ORDER
+VISIONLAB_PHASE
+VISIONLAB_PLATFORM
+VISIONLAB_ARCHITECTURE
+VISIONLAB_ALGORITHM
+VISIONLAB_RESOLUTION_WIDTH
+VISIONLAB_RESOLUTION_HEIGHT
+VISIONLAB_TRIAL_NUMBER
+VISIONLAB_INCIDENCE_ANGLE_DEGREES
+VISIONLAB_TARGET_ILLUMINANCE_LUX
+VISIONLAB_SOURCE_OUTPUT_SETTING
+VISIONLAB_TARGET_FPS
+VISIONLAB_FRAME_DEADLINE_MS
+```
+
+Condition-specific values override matching values from the base
+runner environment.
+
+For `constant_lux` runs,
+`VISIONLAB_SOURCE_OUTPUT_SETTING` is empty. For `constant_source`
+runs, `VISIONLAB_TARGET_ILLUMINANCE_LUX` is empty.
+
+Architecture runners must validate these values before starting image
+capture or processing.
+
+Runner-specific optional environment values include:
+
+```text
+VISIONLAB_RESULTS_ROOT
+VISIONLAB_CPP_MODULE_DIR
+VISIONLAB_CPP_REALTIME_EXECUTABLE
+```
+
+`VISIONLAB_RESULTS_ROOT` selects the root directory for generated run
+artifacts.
+
+`VISIONLAB_CPP_MODULE_DIR` identifies the directory containing the
+Release Hybrid module.
+
+`VISIONLAB_CPP_REALTIME_EXECUTABLE` identifies the Release Pure C++
+real-time executable.
+
+`VISIONLAB_CPP_FRAME_RESULTS_PATH` is internal to the Pure C++ adapter
+and must not be configured manually.
+
+### Execute the next planned run
+
+Run from the repository root:
+
+```bash
+python -m \
+benchmarks.experiments.execute_controlled_illumination_run \
+--plan path/to/run_plan.json \
+--runner-config path/to/runner_config.json
+```
+
+By default, progress is stored beside the run plan as:
+
+```text
+run_progress.json
+```
+
+A custom progress path can be selected with:
+
+```bash
+python -m \
+benchmarks.experiments.execute_controlled_illumination_run \
+--plan path/to/run_plan.json \
+--progress path/to/run_progress.json \
+--runner-config path/to/runner_config.json
+```
+
+### Exit behavior
+
+The command uses the following exit codes:
+
+* `0`: the selected run completed successfully, or no planned runs remain
+* `1`: configuration, validation or architecture-runner failure
+* `130`: execution was interrupted by the user
+
+A successful runner result transitions the selected run from
+`running` to `completed`.
+
+A non-zero runner result or execution exception transitions the run
+to `failed` and records the failure reason.
+
+When the user interrupts execution with `Ctrl+C`, the run is atomically
+marked as `failed` before the command exits with code `130`. The run can
+then be returned to `planned` status with the run-tracking CLI before
+being attempted again.
+
+Generated progress files and local runner configurations are
+experiment artifacts. Archive them together with the run plan,
+environment metadata and result files, but do not commit them to Git.

@@ -18,6 +18,20 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
     ControlledIlluminationExecutionSummary,
     execution_summary_from_dict,
     load_execution_summary,
+    validate_execution_summary_matches_run,
+    validate_metadata_matches_run,
+    validate_summary_counts_against_config,
+    validate_summary_frame_hash,
+)
+
+from benchmarks.experiments.controlled_illumination_metadata import (
+    load_controlled_illumination_config,
+)
+from benchmarks.experiments.controlled_illumination_run_planner import (
+    PlannedRun,
+)
+from benchmarks.experiments.generate_dry_run_metadata import (
+    build_dry_run_metadata,
 )
 
 
@@ -63,7 +77,7 @@ class ControlledIlluminationRunBundleTests(
             experiment_id="experiment-test",
             run_id="run-test-0001",
             run_plan_sha256=VALID_PLAN_SHA256,
-            metadata_dry_run=False, # type: ignore[arg-type]
+            metadata_dry_run=False,
             artifacts=self.create_artifacts(),
         )
 
@@ -131,6 +145,109 @@ class ControlledIlluminationRunBundleTests(
             ),
             "frame_results_sha256": "c" * 64,
         }
+
+    def create_metadata_and_planned_run(
+        self,
+    ) -> tuple[dict, object, PlannedRun]:
+        config = (
+            load_controlled_illumination_config()
+        )
+        metadata = build_dry_run_metadata(
+            config,
+            "d" * 40,
+        )
+
+        planned_run = PlannedRun(
+            execution_order=1,
+            experiment_id=metadata.experiment_id,
+            run_id=metadata.run_id,
+            phase=metadata.phase,
+            platform=metadata.platform,
+            architecture=metadata.architecture,
+            algorithm=metadata.algorithm,
+            resolution=metadata.resolution,
+            trial_number=metadata.trial_number,
+            incidence_angle_degrees=(
+                metadata.incidence_angle_degrees
+            ),
+            target_illuminance_lux=(
+                metadata.target_illuminance_lux
+            ),
+            source_output_setting=None,
+            target_fps=metadata.target_fps,
+            frame_deadline_ms=(
+                metadata.frame_deadline_ms
+            ),
+        )
+
+        return config, metadata, planned_run
+
+    def create_summary_for_run(
+            self,
+            planned_run: PlannedRun,
+            config: dict,
+            *,
+            frame_hash: str = "c" * 64,
+    ):
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        measured_frames = config["execution"][
+            "measured_frames"
+        ]
+
+        summary_value.update(
+            {
+                "experiment_id": (
+                    planned_run.experiment_id
+                ),
+                "run_id": planned_run.run_id,
+                "execution_order": (
+                    planned_run.execution_order
+                ),
+                "phase": planned_run.phase,
+                "platform": planned_run.platform,
+                "architecture": (
+                    planned_run.architecture
+                ),
+                "algorithm": planned_run.algorithm,
+                "resolution": {
+                    "width": (
+                        planned_run.resolution.width
+                    ),
+                    "height": (
+                        planned_run.resolution.height
+                    ),
+                },
+                "trial_number": (
+                    planned_run.trial_number
+                ),
+                "warmup_frame_count": (
+                    config["execution"][
+                        "warmup_frames"
+                    ]
+                ),
+                "measured_frame_count": (
+                    measured_frames
+                ),
+                "processed_frame_count": (
+                    measured_frames
+                ),
+                "dropped_frame_count": 0,
+                "skipped_frame_count": 0,
+                "deadline_met_count": (
+                    measured_frames
+                ),
+                "deadline_miss_count": 0,
+                "frame_results_sha256": (
+                    frame_hash
+                ),
+            }
+        )
+
+        return execution_summary_from_dict(
+            summary_value
+        )
 
     def write_execution_summary(
         self,
@@ -228,7 +345,7 @@ class ControlledIlluminationRunBundleTests(
         ):
             replace(
                 self.create_manifest(),
-                metadata_dry_run="false",
+                metadata_dry_run="false", # type: ignore[arg-type]
             )
 
     def test_missing_artifact_is_rejected(
@@ -406,6 +523,7 @@ class ControlledIlluminationRunBundleTests(
                 collect_bundle_artifacts(
                     run_directory
                 )
+
     def test_valid_execution_summary_is_loaded(
         self,
     ) -> None:
@@ -604,6 +722,181 @@ class ControlledIlluminationRunBundleTests(
         ):
             execution_summary_from_dict(
                 summary_value
+            )
+
+    def test_summary_matches_planned_run(
+        self,
+    ) -> None:
+        config, _, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+        summary = self.create_summary_for_run(
+            planned_run,
+            config,
+        )
+
+        validate_execution_summary_matches_run(
+            summary,
+            planned_run,
+        )
+
+    def test_summary_run_mismatch_is_rejected(
+        self,
+    ) -> None:
+        config, _, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+        summary = self.create_summary_for_run(
+            planned_run,
+            config,
+        )
+        mismatched_run = replace(
+            planned_run,
+            run_id="different-run",
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "run_id",
+        ):
+            validate_execution_summary_matches_run(
+                summary,
+                mismatched_run,
+            )
+
+    def test_metadata_matches_planned_run(
+        self,
+    ) -> None:
+        _, metadata, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+
+        validate_metadata_matches_run(
+            metadata,
+            planned_run,
+        )
+
+    def test_metadata_angle_mismatch_is_rejected(
+        self,
+    ) -> None:
+        _, metadata, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+        mismatched_metadata = replace(
+            metadata,
+            incidence_angle_degrees=(
+                metadata.incidence_angle_degrees
+                + 1.0
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "incidence_angle_degrees",
+        ):
+            validate_metadata_matches_run(
+                mismatched_metadata,
+                planned_run,
+            )
+
+    def test_constant_source_mismatch_is_rejected(
+        self,
+    ) -> None:
+        _, metadata, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+        source_run = replace(
+            planned_run,
+            phase="constant_source",
+            target_illuminance_lux=None,
+            source_output_setting="level-1",
+        )
+        source_metadata = replace(
+            metadata,
+            phase="constant_source",
+            target_illuminance_lux=None,
+            source_output_setting="level-2",
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "source-output",
+        ):
+            validate_metadata_matches_run(
+                source_metadata,
+                source_run,
+            )
+
+    def test_summary_frame_hash_is_validated(
+        self,
+    ) -> None:
+        config, _, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+        summary = self.create_summary_for_run(
+            planned_run,
+            config,
+            frame_hash="e" * 64,
+        )
+        frame_artifact = RunBundleArtifact(
+            file_name=FRAME_RESULTS_FILE_NAME,
+            sha256="e" * 64,
+            size_bytes=100,
+        )
+
+        validate_summary_frame_hash(
+            summary,
+            (frame_artifact,),
+        )
+
+        mismatched_artifact = replace(
+            frame_artifact,
+            sha256="f" * 64,
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "SHA-256",
+        ):
+            validate_summary_frame_hash(
+                summary,
+                (mismatched_artifact,),
+            )
+
+    def test_summary_counts_match_configuration(
+        self,
+    ) -> None:
+        config, _, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+        summary = self.create_summary_for_run(
+            planned_run,
+            config,
+        )
+
+        validate_summary_counts_against_config(
+            summary,
+            config,
+        )
+
+        mismatched_config = {
+            **config,
+            "execution": {
+                **config["execution"],
+                "measured_frames": (
+                    summary.measured_frame_count
+                    + 1
+                ),
+            },
+        }
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "measured-frame",
+        ):
+            validate_summary_counts_against_config(
+                summary,
+                mismatched_config,
             )
 
 

@@ -11,6 +11,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
     validate_safe_identifier,
     validate_utc_timestamp,
+    ControlledIlluminationRunMetadata,
 )
 from benchmarks.experiments.controlled_illumination_run_state import (
     validate_run_plan_sha256,
@@ -22,6 +23,9 @@ from benchmarks.experiments.controlled_illumination_run_artifacts import (
     calculate_file_sha256,
 )
 
+from benchmarks.experiments.controlled_illumination_run_planner import (
+    PlannedRun,
+)
 
 RUN_BUNDLE_SCHEMA_VERSION = 1
 
@@ -76,6 +80,205 @@ class ControlledIlluminationRunBundleError(
 ):
     """Raised when a controlled run bundle is invalid."""
 
+
+def validate_execution_summary_matches_run(
+    summary: ControlledIlluminationExecutionSummary,
+    planned_run: PlannedRun,
+) -> None:
+    expected_fields = {
+        "experiment_id": planned_run.experiment_id,
+        "run_id": planned_run.run_id,
+        "execution_order": planned_run.execution_order,
+        "phase": planned_run.phase,
+        "platform": planned_run.platform,
+        "architecture": planned_run.architecture,
+        "algorithm": planned_run.algorithm,
+        "trial_number": planned_run.trial_number,
+    }
+
+    for field_name, expected_value in (
+        expected_fields.items()
+    ):
+        actual_value = getattr(
+            summary,
+            field_name,
+        )
+
+        if actual_value != expected_value:
+            raise ControlledIlluminationRunBundleError(
+                "Execution summary does not match "
+                f"the planned run: {field_name}"
+            )
+
+    if (
+        summary.resolution.width
+        != planned_run.resolution.width
+        or summary.resolution.height
+        != planned_run.resolution.height
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Execution summary does not match "
+            "the planned run: resolution"
+        )
+
+def validate_metadata_matches_run(
+    metadata: ControlledIlluminationRunMetadata,
+    planned_run: PlannedRun,
+) -> None:
+    expected_fields = {
+        "experiment_id": planned_run.experiment_id,
+        "run_id": planned_run.run_id,
+        "phase": planned_run.phase,
+        "platform": planned_run.platform,
+        "architecture": planned_run.architecture,
+        "algorithm": planned_run.algorithm,
+        "trial_number": planned_run.trial_number,
+        "incidence_angle_degrees": (
+            planned_run.incidence_angle_degrees
+        ),
+        "target_fps": planned_run.target_fps,
+        "frame_deadline_ms": (
+            planned_run.frame_deadline_ms
+        ),
+        "target_illuminance_lux": (
+            planned_run.target_illuminance_lux
+        ),
+    }
+
+    for field_name, expected_value in (
+        expected_fields.items()
+    ):
+        actual_value = getattr(
+            metadata,
+            field_name,
+        )
+
+        if actual_value != expected_value:
+            raise ControlledIlluminationRunBundleError(
+                "Run metadata does not match "
+                f"the planned run: {field_name}"
+            )
+
+    if (
+        metadata.resolution.width
+        != planned_run.resolution.width
+        or metadata.resolution.height
+        != planned_run.resolution.height
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Run metadata does not match "
+            "the planned run: resolution"
+        )
+
+    if (
+        planned_run.phase == "constant_source"
+        and metadata.source_output_setting
+        != planned_run.source_output_setting
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Run metadata source-output setting "
+            "does not match the planned run."
+        )
+
+def validate_summary_counts_against_config(
+    summary: ControlledIlluminationExecutionSummary,
+    config: dict,
+) -> None:
+    execution_config = config.get("execution")
+
+    if not isinstance(execution_config, dict):
+        raise ControlledIlluminationRunBundleError(
+            "Experiment execution configuration "
+            "is missing or invalid."
+        )
+
+    expected_warmup_frames = (
+        execution_config.get("warmup_frames")
+    )
+    expected_measured_frames = (
+        execution_config.get("measured_frames")
+    )
+
+    if (
+        isinstance(expected_warmup_frames, bool)
+        or not isinstance(
+            expected_warmup_frames,
+            int,
+        )
+        or expected_warmup_frames < 0
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Configured warm-up frame count "
+            "is invalid."
+        )
+
+    if (
+        isinstance(expected_measured_frames, bool)
+        or not isinstance(
+            expected_measured_frames,
+            int,
+        )
+        or expected_measured_frames <= 0
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Configured measured-frame count "
+            "is invalid."
+        )
+
+    if (
+        summary.warmup_frame_count
+        != expected_warmup_frames
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Execution-summary warm-up frame count "
+            "does not match the configuration."
+        )
+
+    if (
+        summary.measured_frame_count
+        != expected_measured_frames
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Execution-summary measured-frame count "
+            "does not match the configuration."
+        )
+
+def validate_summary_frame_hash(
+    summary: ControlledIlluminationExecutionSummary,
+    artifacts: tuple[RunBundleArtifact, ...],
+) -> None:
+    if (
+        summary.frame_results_file
+        != FRAME_RESULTS_FILE_NAME
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Execution summary references an "
+            "unexpected frame-results file."
+        )
+
+    frame_artifacts = [
+        artifact
+        for artifact in artifacts
+        if artifact.file_name
+        == summary.frame_results_file
+    ]
+
+    if len(frame_artifacts) != 1:
+        raise ControlledIlluminationRunBundleError(
+            "Exactly one frame-results artifact "
+            "is required."
+        )
+
+    frame_artifact = frame_artifacts[0]
+
+    if (
+        frame_artifact.sha256
+        != summary.frame_results_sha256
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Frame-results SHA-256 does not match "
+            "the execution summary."
+        )
 
 def validate_bundle_identifier(
     value: Any,

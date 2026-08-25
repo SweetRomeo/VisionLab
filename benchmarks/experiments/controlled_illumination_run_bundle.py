@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime
 import json
 import math
+import os
+from uuid import uuid4
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -922,3 +924,61 @@ class ControlledIlluminationRunBundleManifest:
                 for artifact in self.artifacts
             ],
         }
+
+def write_run_bundle_manifest_atomic(
+    manifest: ControlledIlluminationRunBundleManifest,
+    run_directory: str | Path,
+) -> Path:
+    if not isinstance(
+        manifest,
+        ControlledIlluminationRunBundleManifest,
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "manifest must be "
+            "ControlledIlluminationRunBundleManifest."
+        )
+
+    resolved_directory = resolve_run_directory(
+        run_directory
+    )
+    output_path = (
+        resolved_directory
+        / RUN_BUNDLE_MANIFEST_FILE_NAME
+    )
+
+    if output_path.exists():
+        raise ControlledIlluminationRunBundleError(
+            "Run bundle has already been finalized: "
+            f"{output_path}"
+        )
+
+    temporary_path = output_path.with_name(
+        f".{output_path.name}."
+        f"{uuid4().hex}.tmp"
+    )
+
+    try:
+        with temporary_path.open(
+            "x",
+            encoding="utf-8",
+        ) as output_file:
+            json.dump(
+                manifest.to_dict(),
+                output_file,
+                indent=2,
+                ensure_ascii=False,
+            )
+            output_file.write("\n")
+            output_file.flush()
+            os.fsync(output_file.fileno())
+
+        os.replace(
+            temporary_path,
+            output_path,
+        )
+    finally:
+        temporary_path.unlink(
+            missing_ok=True,
+        )
+
+    return output_path

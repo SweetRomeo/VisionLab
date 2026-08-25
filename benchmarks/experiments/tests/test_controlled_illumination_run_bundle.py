@@ -22,6 +22,8 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
     validate_metadata_matches_run,
     validate_summary_counts_against_config,
     validate_summary_frame_hash,
+    RUN_BUNDLE_MANIFEST_FILE_NAME,
+    write_run_bundle_manifest_atomic,
 )
 
 from benchmarks.experiments.controlled_illumination_metadata import (
@@ -293,6 +295,72 @@ class ControlledIlluminationRunBundleTests(
             3,
         )
 
+    def test_bundle_manifest_is_written_atomically(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            manifest = self.create_manifest()
+
+            output_path = (
+                write_run_bundle_manifest_atomic(
+                    manifest,
+                    run_directory,
+                )
+            )
+
+            with output_path.open(
+                "r",
+                encoding="utf-8",
+            ) as manifest_file:
+                stored_value = json.load(
+                    manifest_file
+                )
+
+        self.assertEqual(
+            output_path.name,
+            RUN_BUNDLE_MANIFEST_FILE_NAME,
+        )
+        self.assertEqual(
+            stored_value,
+            manifest.to_dict(),
+        )
+
+    def test_existing_bundle_manifest_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            manifest = self.create_manifest()
+
+            output_path = (
+                write_run_bundle_manifest_atomic(
+                    manifest,
+                    run_directory,
+                )
+            )
+            original_content = (
+                output_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                "already been finalized",
+            ):
+                write_run_bundle_manifest_atomic(
+                    manifest,
+                    run_directory,
+                )
+
+            self.assertEqual(
+                output_path.read_text(
+                    encoding="utf-8",
+                ),
+                original_content,
+            )
+
     def test_invalid_schema_version_is_rejected(
         self,
     ) -> None:
@@ -303,6 +371,8 @@ class ControlledIlluminationRunBundleTests(
                 self.create_manifest(),
                 schema_version=2,
             )
+
+
 
     def test_invalid_timestamp_is_rejected(
         self,

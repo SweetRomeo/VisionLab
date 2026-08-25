@@ -153,10 +153,6 @@ if(WIN32)
     )
 
     # Do not copy Debug OpenCV DLLs into Release output.
-    list(
-        FILTER OPENCV_RUNTIME_DLLS
-        EXCLUDE REGEX "d\\.dll$"
-    )
 
     if(OPENCV_RUNTIME_DLLS)
         add_custom_command(

@@ -752,40 +752,6 @@ real-time executable.
 `VISIONLAB_CPP_FRAME_RESULTS_PATH` is internal to the Pure C++ adapter
 and must not be configured manually.
 
-
-### Run environment
-
-The orchestrator passes the selected condition to the architecture
-runner through environment variables:
-
-```text
-VISIONLAB_EXPERIMENT_ID
-VISIONLAB_RUN_ID
-VISIONLAB_EXECUTION_ORDER
-VISIONLAB_PHASE
-VISIONLAB_PLATFORM
-VISIONLAB_ARCHITECTURE
-VISIONLAB_ALGORITHM
-VISIONLAB_RESOLUTION_WIDTH
-VISIONLAB_RESOLUTION_HEIGHT
-VISIONLAB_TRIAL_NUMBER
-VISIONLAB_INCIDENCE_ANGLE_DEGREES
-VISIONLAB_TARGET_ILLUMINANCE_LUX
-VISIONLAB_SOURCE_OUTPUT_SETTING
-VISIONLAB_TARGET_FPS
-VISIONLAB_FRAME_DEADLINE_MS
-```
-
-Condition-specific values override matching values from the base
-runner environment.
-
-For `constant_lux` runs,
-`VISIONLAB_SOURCE_OUTPUT_SETTING` is empty. For `constant_source`
-runs, `VISIONLAB_TARGET_ILLUMINANCE_LUX` is empty.
-
-Architecture runners must validate these values before starting image
-capture or processing.
-
 ### Execute the next planned run
 
 Run from the repository root:

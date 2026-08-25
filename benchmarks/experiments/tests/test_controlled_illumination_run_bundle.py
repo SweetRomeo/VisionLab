@@ -3,6 +3,7 @@ import unittest
 import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 
 from benchmarks.experiments.controlled_illumination_run_bundle import (
     ControlledIlluminationRunBundleError,
@@ -14,6 +15,9 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
     REQUIRED_BUNDLE_ARTIFACT_ORDER,
     collect_bundle_artifacts,
     resolve_run_directory,
+    ControlledIlluminationExecutionSummary,
+    execution_summary_from_dict,
+    load_execution_summary,
 )
 
 
@@ -88,6 +92,67 @@ class ControlledIlluminationRunBundleTests(
             ).write_bytes(content)
 
         return file_contents
+
+    def create_execution_summary_value(
+        self,
+    ) -> dict:
+        return {
+            "schema_version": 1,
+            "status": "completed",
+            "experiment_id": "experiment-test",
+            "run_id": "run-test-0001",
+            "execution_order": 1,
+            "phase": "constant_lux",
+            "platform": "desktop",
+            "architecture": "pure_python",
+            "algorithm": "original",
+            "resolution": {
+                "width": 640,
+                "height": 480,
+            },
+            "trial_number": 1,
+            "started_at_utc": (
+                "2026-08-26T10:00:00Z"
+            ),
+            "finished_at_utc": (
+                "2026-08-26T10:01:00Z"
+            ),
+            "warmup_frame_count": 30,
+            "measured_frame_count": 3,
+            "processed_frame_count": 2,
+            "dropped_frame_count": 1,
+            "skipped_frame_count": 0,
+            "deadline_met_count": 1,
+            "deadline_miss_count": 1,
+            "mean_processing_time_ms": 5.0,
+            "mean_end_to_end_latency_ms": 7.0,
+            "frame_results_file": (
+                FRAME_RESULTS_FILE_NAME
+            ),
+            "frame_results_sha256": "c" * 64,
+        }
+
+    def write_execution_summary(
+        self,
+        directory: Path,
+        value: dict,
+    ) -> Path:
+        output_path = (
+            directory
+            / EXECUTION_SUMMARY_FILE_NAME
+        )
+
+        with output_path.open(
+            "w",
+            encoding="utf-8",
+        ) as output_file:
+            json.dump(
+                value,
+                output_file,
+            )
+            output_file.write("\n")
+
+        return output_path
 
     def test_valid_manifest_is_serialized(
         self,
@@ -341,6 +406,205 @@ class ControlledIlluminationRunBundleTests(
                 collect_bundle_artifacts(
                     run_directory
                 )
+    def test_valid_execution_summary_is_loaded(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            self.write_execution_summary(
+                run_directory,
+                self.create_execution_summary_value(),
+            )
+
+            summary = load_execution_summary(
+                run_directory
+            )
+
+        self.assertIsInstance(
+            summary,
+            ControlledIlluminationExecutionSummary,
+        )
+        self.assertEqual(
+            summary.experiment_id,
+            "experiment-test",
+        )
+        self.assertEqual(
+            summary.resolution.width,
+            640,
+        )
+        self.assertEqual(
+            summary.measured_frame_count,
+            3,
+        )
+
+    def test_invalid_execution_summary_json_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                run_directory
+                / EXECUTION_SUMMARY_FILE_NAME
+            ).write_text(
+                "{invalid",
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(
+                ControlledIlluminationRunBundleError
+            ):
+                load_execution_summary(
+                    run_directory
+                )
+
+    def test_missing_summary_field_is_rejected(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        del summary_value["run_id"]
+
+        with self.assertRaises(
+            ControlledIlluminationRunBundleError
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_unexpected_summary_field_is_rejected(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value["unexpected"] = True
+
+        with self.assertRaises(
+            ControlledIlluminationRunBundleError
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_invalid_frame_counts_are_rejected(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value[
+            "processed_frame_count"
+        ] = 3
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "measured_frame_count",
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_invalid_deadline_counts_are_rejected(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value[
+            "deadline_met_count"
+        ] = 2
+        summary_value[
+            "deadline_miss_count"
+        ] = 2
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "Deadline counts",
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_reversed_summary_timestamps_are_rejected(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value["finished_at_utc"] = (
+            "2026-08-26T09:59:00Z"
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "finished_at_utc",
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_processed_frames_require_mean_values(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value[
+            "mean_processing_time_ms"
+        ] = None
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "mean timing",
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_zero_processed_frames_reject_mean_values(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value[
+            "processed_frame_count"
+        ] = 0
+        summary_value[
+            "dropped_frame_count"
+        ] = 3
+        summary_value[
+            "deadline_met_count"
+        ] = 0
+        summary_value[
+            "deadline_miss_count"
+        ] = 0
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationRunBundleError,
+            "must be null",
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
+    def test_invalid_frame_result_hash_is_rejected(
+        self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+        summary_value[
+            "frame_results_sha256"
+        ] = "invalid"
+
+        with self.assertRaises(
+            ControlledIlluminationRunBundleError
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
 
 
 if __name__ == "__main__":

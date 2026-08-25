@@ -3,8 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 from pathlib import Path
+from datetime import datetime
+import json
+import math
 
 from benchmarks.experiments.controlled_illumination_metadata import (
+    ResolutionMetadata,
     validate_safe_identifier,
     validate_utc_timestamp,
 )
@@ -31,6 +35,35 @@ REQUIRED_BUNDLE_ARTIFACT_ORDER = (
 
 RUN_BUNDLE_MANIFEST_FILE_NAME = (
     "run_bundle_manifest.json"
+)
+
+EXECUTION_SUMMARY_FIELDS = frozenset(
+    {
+        "schema_version",
+        "status",
+        "experiment_id",
+        "run_id",
+        "execution_order",
+        "phase",
+        "platform",
+        "architecture",
+        "algorithm",
+        "resolution",
+        "trial_number",
+        "started_at_utc",
+        "finished_at_utc",
+        "warmup_frame_count",
+        "measured_frame_count",
+        "processed_frame_count",
+        "dropped_frame_count",
+        "skipped_frame_count",
+        "deadline_met_count",
+        "deadline_miss_count",
+        "mean_processing_time_ms",
+        "mean_end_to_end_latency_ms",
+        "frame_results_file",
+        "frame_results_sha256",
+    }
 )
 
 REQUIRED_BUNDLE_ARTIFACTS = frozenset(
@@ -238,6 +271,335 @@ def collect_bundle_artifacts(
         )
 
     return tuple(artifacts)
+
+def require_summary_integer(
+    value: Any,
+    field_name: str,
+    *,
+    positive: bool = False,
+) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or (positive and value <= 0)
+        or (not positive and value < 0)
+    ):
+        requirement = (
+            "positive"
+            if positive
+            else "non-negative"
+        )
+
+        raise ControlledIlluminationRunBundleError(
+            f"{field_name} must be a "
+            f"{requirement} integer."
+        )
+
+    return value
+
+
+def require_optional_summary_number(
+    value: Any,
+    field_name: str,
+) -> float | None:
+    if value is None:
+        return None
+
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value < 0.0
+    ):
+        raise ControlledIlluminationRunBundleError(
+            f"{field_name} must be null or a "
+            "non-negative finite number."
+        )
+
+    return float(value)
+
+
+@dataclass(frozen=True)
+class ControlledIlluminationExecutionSummary:
+    schema_version: int
+    status: str
+    experiment_id: str
+    run_id: str
+    execution_order: int
+    phase: str
+    platform: str
+    architecture: str
+    algorithm: str
+    resolution: ResolutionMetadata
+    trial_number: int
+    started_at_utc: str
+    finished_at_utc: str
+    warmup_frame_count: int
+    measured_frame_count: int
+    processed_frame_count: int
+    dropped_frame_count: int
+    skipped_frame_count: int
+    deadline_met_count: int
+    deadline_miss_count: int
+    mean_processing_time_ms: float | None
+    mean_end_to_end_latency_ms: float | None
+    frame_results_file: str
+    frame_results_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != 1
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "Execution summary schema_version "
+                "must be 1."
+            )
+
+        if self.status != "completed":
+            raise ControlledIlluminationRunBundleError(
+                "Execution summary status must be "
+                "completed."
+            )
+
+        for field_name in (
+            "experiment_id",
+            "run_id",
+            "phase",
+            "platform",
+            "architecture",
+            "algorithm",
+        ):
+            validate_bundle_identifier(
+                getattr(self, field_name),
+                field_name,
+            )
+
+        if not isinstance(
+            self.resolution,
+            ResolutionMetadata,
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "resolution must be "
+                "ResolutionMetadata."
+            )
+
+        require_summary_integer(
+            self.execution_order,
+            "execution_order",
+            positive=True,
+        )
+        require_summary_integer(
+            self.trial_number,
+            "trial_number",
+            positive=True,
+        )
+        require_summary_integer(
+            self.warmup_frame_count,
+            "warmup_frame_count",
+        )
+        require_summary_integer(
+            self.measured_frame_count,
+            "measured_frame_count",
+            positive=True,
+        )
+
+        for field_name in (
+            "processed_frame_count",
+            "dropped_frame_count",
+            "skipped_frame_count",
+            "deadline_met_count",
+            "deadline_miss_count",
+        ):
+            require_summary_integer(
+                getattr(self, field_name),
+                field_name,
+            )
+
+        if (
+            self.processed_frame_count
+            + self.dropped_frame_count
+            + self.skipped_frame_count
+            != self.measured_frame_count
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "Processed, dropped and skipped frame "
+                "counts must equal measured_frame_count."
+            )
+
+        if (
+            self.deadline_met_count
+            + self.deadline_miss_count
+            != self.processed_frame_count
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "Deadline counts must equal "
+                "processed_frame_count."
+            )
+
+        started_at = validate_bundle_timestamp(
+            self.started_at_utc,
+            "started_at_utc",
+        )
+        finished_at = validate_bundle_timestamp(
+            self.finished_at_utc,
+            "finished_at_utc",
+        )
+
+        started_datetime = datetime.fromisoformat(
+            started_at.replace("Z", "+00:00")
+        )
+        finished_datetime = datetime.fromisoformat(
+            finished_at.replace("Z", "+00:00")
+        )
+
+        if finished_datetime < started_datetime:
+            raise ControlledIlluminationRunBundleError(
+                "finished_at_utc cannot be earlier "
+                "than started_at_utc."
+            )
+
+        require_optional_summary_number(
+            self.mean_processing_time_ms,
+            "mean_processing_time_ms",
+        )
+        require_optional_summary_number(
+            self.mean_end_to_end_latency_ms,
+            "mean_end_to_end_latency_ms",
+        )
+
+        if (
+            self.processed_frame_count > 0
+            and (
+                self.mean_processing_time_ms is None
+                or self.mean_end_to_end_latency_ms
+                is None
+            )
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "Processed frames require mean timing "
+                "values."
+            )
+
+        if (
+            self.processed_frame_count == 0
+            and (
+                self.mean_processing_time_ms
+                is not None
+                or self.mean_end_to_end_latency_ms
+                is not None
+            )
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "Mean timing values must be null when "
+                "no frames were processed."
+            )
+
+        if (
+            self.frame_results_file
+            != FRAME_RESULTS_FILE_NAME
+        ):
+            raise ControlledIlluminationRunBundleError(
+                "Execution summary references an "
+                "unexpected frame-result file."
+            )
+
+        validate_sha256(
+            self.frame_results_sha256,
+            "frame_results_sha256",
+        )
+
+
+def execution_summary_from_dict(
+    value: Any,
+) -> ControlledIlluminationExecutionSummary:
+    if not isinstance(value, dict):
+        raise ControlledIlluminationRunBundleError(
+            "Execution summary root must be an object."
+        )
+
+    actual_fields = set(value)
+
+    if actual_fields != EXECUTION_SUMMARY_FIELDS:
+        missing_fields = sorted(
+            EXECUTION_SUMMARY_FIELDS - actual_fields
+        )
+        unexpected_fields = sorted(
+            actual_fields - EXECUTION_SUMMARY_FIELDS
+        )
+
+        raise ControlledIlluminationRunBundleError(
+            "Execution summary fields do not match "
+            "the required schema. "
+            f"Missing: {missing_fields}; "
+            f"unexpected: {unexpected_fields}"
+        )
+
+    resolution_value = value["resolution"]
+
+    if (
+        not isinstance(resolution_value, dict)
+        or set(resolution_value)
+        != {"width", "height"}
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Execution summary resolution must "
+            "contain exactly width and height."
+        )
+
+    try:
+        resolution = ResolutionMetadata(
+            width=resolution_value["width"],
+            height=resolution_value["height"],
+        )
+    except ValueError as error:
+        raise ControlledIlluminationRunBundleError(
+            f"Invalid execution resolution: {error}"
+        ) from error
+
+    summary_arguments = dict(value)
+    summary_arguments["resolution"] = resolution
+
+    try:
+        return ControlledIlluminationExecutionSummary(
+            **summary_arguments
+        )
+    except TypeError as error:
+        raise ControlledIlluminationRunBundleError(
+            "Invalid execution summary structure: "
+            f"{error}"
+        ) from error
+
+
+def load_execution_summary(
+    run_directory: str | Path,
+) -> ControlledIlluminationExecutionSummary:
+    resolved_directory = resolve_run_directory(
+        run_directory
+    )
+    summary_path = require_bundle_artifact_path(
+        resolved_directory,
+        EXECUTION_SUMMARY_FILE_NAME,
+    )
+
+    try:
+        with summary_path.open(
+            "r",
+            encoding="utf-8",
+        ) as summary_file:
+            summary_value = json.load(
+                summary_file
+            )
+    except json.JSONDecodeError as error:
+        raise ControlledIlluminationRunBundleError(
+            "Invalid execution summary JSON: "
+            f"{error}"
+        ) from error
+
+    return execution_summary_from_dict(
+        summary_value
+    )
 
 @dataclass(frozen=True)
 class ControlledIlluminationRunBundleManifest:

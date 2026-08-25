@@ -152,6 +152,12 @@ if(WIN32)
         "${OPENCV_RUNTIME_DIR}/*.dll"
     )
 
+    # Do not copy Debug OpenCV DLLs into Release output.
+    list(
+        FILTER OPENCV_RUNTIME_DLLS
+        EXCLUDE REGEX "d\\.dll$"
+    )
+
     if(OPENCV_RUNTIME_DLLS)
         add_custom_command(
             TARGET VisionLabCore
@@ -214,4 +220,18 @@ if(WIN32)
             "OpenCV runtime DLL files were not found."
         )
     endif()
+
+    add_custom_command(
+        TARGET VisionLabCppRealtime
+        POST_BUILD
+
+        COMMAND
+            ${CMAKE_COMMAND}
+            -E copy_if_different
+            $<TARGET_FILE:Qt6::Core>
+            $<TARGET_FILE_DIR:VisionLabCppRealtime>
+
+        COMMENT
+            "Copying Qt Core runtime DLL for real-time runner"
+    )
 endif()

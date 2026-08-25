@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Any
+from pathlib import Path
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     validate_safe_identifier,
@@ -11,26 +12,29 @@ from benchmarks.experiments.controlled_illumination_run_state import (
     validate_run_plan_sha256,
 )
 
+from benchmarks.experiments.controlled_illumination_run_artifacts import (
+    EXECUTION_SUMMARY_FILE_NAME,
+    FRAME_RESULTS_FILE_NAME,
+    calculate_file_sha256,
+)
+
 
 RUN_BUNDLE_SCHEMA_VERSION = 1
 
-FRAME_RESULTS_FILE_NAME = (
-    "realtime_frame_results.csv"
-)
-EXECUTION_SUMMARY_FILE_NAME = (
-    "execution_summary.json"
-)
 RUN_METADATA_FILE_NAME = "run_metadata.json"
+
+REQUIRED_BUNDLE_ARTIFACT_ORDER = (
+    FRAME_RESULTS_FILE_NAME,
+    EXECUTION_SUMMARY_FILE_NAME,
+    RUN_METADATA_FILE_NAME,
+)
+
 RUN_BUNDLE_MANIFEST_FILE_NAME = (
     "run_bundle_manifest.json"
 )
 
 REQUIRED_BUNDLE_ARTIFACTS = frozenset(
-    {
-        FRAME_RESULTS_FILE_NAME,
-        EXECUTION_SUMMARY_FILE_NAME,
-        RUN_METADATA_FILE_NAME,
-    }
+    REQUIRED_BUNDLE_ARTIFACT_ORDER
 )
 
 
@@ -103,6 +107,69 @@ def validate_sha256(
 
     return value
 
+def resolve_run_directory(
+    run_directory: str | Path,
+) -> Path:
+    if (
+        not isinstance(run_directory, (str, Path))
+        or (
+            isinstance(run_directory, str)
+            and not run_directory.strip()
+        )
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "run_directory must be a non-empty path."
+        )
+
+    resolved_directory = Path(
+        run_directory
+    ).resolve()
+
+    if not resolved_directory.is_dir():
+        raise ControlledIlluminationRunBundleError(
+            "Run directory was not found: "
+            f"{resolved_directory}"
+        )
+
+    return resolved_directory
+
+
+def require_bundle_artifact_path(
+    run_directory: Path,
+    file_name: str,
+) -> Path:
+    if file_name not in REQUIRED_BUNDLE_ARTIFACTS:
+        raise ControlledIlluminationRunBundleError(
+            f"Unsupported bundle artifact: {file_name}"
+        )
+
+    artifact_path = (
+        run_directory / file_name
+    ).resolve()
+
+    try:
+        artifact_path.relative_to(
+            run_directory
+        )
+    except ValueError as error:
+        raise ControlledIlluminationRunBundleError(
+            "Bundle artifact must remain inside "
+            "the run directory."
+        ) from error
+
+    if not artifact_path.is_file():
+        raise ControlledIlluminationRunBundleError(
+            "Required bundle artifact was not found: "
+            f"{artifact_path}"
+        )
+
+    if artifact_path.stat().st_size <= 0:
+        raise ControlledIlluminationRunBundleError(
+            "Bundle artifact must not be empty: "
+            f"{artifact_path}"
+        )
+
+    return artifact_path
 
 @dataclass(frozen=True)
 class RunBundleArtifact:
@@ -139,6 +206,38 @@ class RunBundleArtifact:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+def collect_bundle_artifacts(
+    run_directory: str | Path,
+) -> tuple[RunBundleArtifact, ...]:
+    resolved_directory = resolve_run_directory(
+        run_directory
+    )
+
+    artifacts = []
+
+    for file_name in (
+        REQUIRED_BUNDLE_ARTIFACT_ORDER
+    ):
+        artifact_path = (
+            require_bundle_artifact_path(
+                resolved_directory,
+                file_name,
+            )
+        )
+
+        artifacts.append(
+            RunBundleArtifact(
+                file_name=file_name,
+                sha256=calculate_file_sha256(
+                    artifact_path
+                ),
+                size_bytes=(
+                    artifact_path.stat().st_size
+                ),
+            )
+        )
+
+    return tuple(artifacts)
 
 @dataclass(frozen=True)
 class ControlledIlluminationRunBundleManifest:

@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
 from dataclasses import asdict, replace
+import csv
 
 from benchmarks.experiments.controlled_illumination_run_bundle import (
     ControlledIlluminationRunBundleError,
@@ -26,6 +27,7 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
     RUN_BUNDLE_MANIFEST_FILE_NAME,
     write_run_bundle_manifest_atomic,
     finalize_run_bundle_atomic,
+    validate_frame_results_against_run,
 )
 
 from benchmarks.experiments.controlled_illumination_metadata import (
@@ -54,6 +56,7 @@ VALID_ARTIFACT_SHA256 = "b" * 64
 class ControlledIlluminationRunBundleTests(
     unittest.TestCase
 ):
+
     def create_artifact(
         self,
         file_name: str,
@@ -368,6 +371,45 @@ class ControlledIlluminationRunBundleTests(
             planned_run,
             frame_results_path,
         )
+
+    def read_frame_result_rows(
+            self,
+            input_path: Path,
+    ) -> tuple[list[str], list[dict[str, str]]]:
+        with input_path.open(
+                "r",
+                newline="",
+                encoding="utf-8",
+        ) as input_file:
+            reader = csv.DictReader(input_file)
+
+            if reader.fieldnames is None:
+                self.fail(
+                    "Frame-results CSV has no header."
+                )
+
+            return (
+                list(reader.fieldnames),
+                list(reader),
+            )
+
+    def write_frame_result_rows(
+            self,
+            output_path: Path,
+            fieldnames: list[str],
+            rows: list[dict[str, str]],
+    ) -> None:
+        with output_path.open(
+                "w",
+                newline="",
+                encoding="utf-8",
+        ) as output_file:
+            writer = csv.DictWriter(
+                output_file,
+                fieldnames=fieldnames,
+            )
+            writer.writeheader()
+            writer.writerows(rows)
 
     def write_execution_summary(
         self,
@@ -1194,6 +1236,224 @@ class ControlledIlluminationRunBundleTests(
                     config,
                     VALID_PLAN_SHA256,
                     "2026-08-26T09:59:00Z",
+                )
+
+    def test_complete_frame_results_are_validated(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+
+            validate_frame_results_against_run(
+                frame_results_path,
+                planned_run,
+                summary,
+            )
+
+    def test_duplicate_frame_index_is_rejected(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            rows[1]["frame_index"] = (
+                rows[0]["frame_index"]
+            )
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "sequential",
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    summary,
+                )
+
+    def test_missing_frame_index_is_rejected(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            rows[-1]["frame_index"] = str(
+                summary.measured_frame_count + 1
+            )
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "sequential",
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    summary,
+                )
+
+    def test_invalid_frame_status_is_rejected(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            rows[0]["frame_status"] = "invalid"
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "Invalid frame_status",
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    summary,
+                )
+
+    def test_frame_status_counts_are_validated(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            mismatched_summary = replace(
+                summary,
+                processed_frame_count=(
+                        summary.processed_frame_count - 1
+                ),
+                skipped_frame_count=1,
+                deadline_met_count=(
+                        summary.deadline_met_count - 1
+                ),
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "Processed-frame count",
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    mismatched_summary,
+                )
+
+    def test_deadline_counts_are_validated(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            mismatched_summary = replace(
+                summary,
+                deadline_met_count=(
+                        summary.deadline_met_count - 1
+                ),
+                deadline_miss_count=1,
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "Deadline-miss count",
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    mismatched_summary,
                 )
 
 

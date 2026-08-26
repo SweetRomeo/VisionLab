@@ -8,6 +8,8 @@ import json
 import math
 import os
 from uuid import uuid4
+from collections import Counter
+import csv
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -28,6 +30,11 @@ from benchmarks.experiments.controlled_illumination_run_artifacts import (
 
 from benchmarks.experiments.controlled_illumination_run_planner import (
     PlannedRun,
+)
+
+from benchmarks.realtime.realtime_records import (
+    FrameStatus,
+    RealtimeFrameRecord,
 )
 
 RUN_BUNDLE_SCHEMA_VERSION = 1
@@ -280,6 +287,461 @@ def validate_summary_frame_hash(
     ):
         raise ControlledIlluminationRunBundleError(
             "Frame-results SHA-256 does not match "
+            "the execution summary."
+        )
+
+def validate_frame_results_against_run(
+    frame_results_path: Path,
+    planned_run: PlannedRun,
+    summary: ControlledIlluminationExecutionSummary,
+) -> None:
+    expected_fields = [
+        "architecture",
+        "algorithm",
+        "resolution",
+        "trial",
+        "frame_index",
+        "scheduled_timestamp_ms",
+        "enqueued_timestamp_ms",
+        "processing_start_timestamp_ms",
+        "processing_end_timestamp_ms",
+        "drop_timestamp_ms",
+        "source_delay_ms",
+        "queue_wait_time_ms",
+        "processing_time_ms",
+        "end_to_end_latency_ms",
+        "deadline_ms",
+        "deadline_missed",
+        "frame_status",
+    ]
+
+    if not isinstance(
+        frame_results_path,
+        Path,
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "frame_results_path must be Path."
+        )
+
+    if not frame_results_path.is_file():
+        raise ControlledIlluminationRunBundleError(
+            "Frame-results CSV was not found: "
+            f"{frame_results_path}"
+        )
+
+    expected_resolution = (
+        f"{planned_run.resolution.width}"
+        f"x{planned_run.resolution.height}"
+    )
+
+    def parse_required_integer(
+        value: str | None,
+        field_name: str,
+        line_number: int,
+    ) -> int:
+        if value is None or not value.strip():
+            raise ControlledIlluminationRunBundleError(
+                f"{field_name} is missing on CSV "
+                f"line {line_number}."
+            )
+
+        try:
+            parsed_value = int(value)
+        except ValueError as error:
+            raise ControlledIlluminationRunBundleError(
+                f"{field_name} must be an integer "
+                f"on CSV line {line_number}."
+            ) from error
+
+        return parsed_value
+
+    def parse_required_number(
+        value: str | None,
+        field_name: str,
+        line_number: int,
+    ) -> float:
+        if value is None or not value.strip():
+            raise ControlledIlluminationRunBundleError(
+                f"{field_name} is missing on CSV "
+                f"line {line_number}."
+            )
+
+        try:
+            parsed_value = float(value)
+        except ValueError as error:
+            raise ControlledIlluminationRunBundleError(
+                f"{field_name} must be numeric "
+                f"on CSV line {line_number}."
+            ) from error
+
+        if not math.isfinite(parsed_value):
+            raise ControlledIlluminationRunBundleError(
+                f"{field_name} must be finite "
+                f"on CSV line {line_number}."
+            )
+
+        return parsed_value
+
+    def parse_optional_number(
+        value: str | None,
+        field_name: str,
+        line_number: int,
+    ) -> float | None:
+        if value is None or not value.strip():
+            return None
+
+        return parse_required_number(
+            value,
+            field_name,
+            line_number,
+        )
+
+    def parse_optional_boolean(
+        value: str | None,
+        field_name: str,
+        line_number: int,
+    ) -> bool | None:
+        if value is None or not value.strip():
+            return None
+
+        normalized_value = value.strip().lower()
+
+        if normalized_value == "true":
+            return True
+
+        if normalized_value == "false":
+            return False
+
+        raise ControlledIlluminationRunBundleError(
+            f"{field_name} must be true, false or "
+            f"empty on CSV line {line_number}."
+        )
+
+    records: list[RealtimeFrameRecord] = []
+
+    try:
+        with frame_results_path.open(
+            "r",
+            newline="",
+            encoding="utf-8",
+        ) as frame_results_file:
+            reader = csv.DictReader(
+                frame_results_file
+            )
+
+            if reader.fieldnames != expected_fields:
+                raise ControlledIlluminationRunBundleError(
+                    "Frame-results CSV fields do not "
+                    "match the required schema. "
+                    f"Expected: {expected_fields}; "
+                    f"actual: {reader.fieldnames}"
+                )
+
+            for line_number, row in enumerate(
+                reader,
+                start=2,
+            ):
+                if None in row:
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Frame-results CSV contains "
+                            "unexpected columns on line "
+                            f"{line_number}."
+                        )
+                    )
+
+                try:
+                    frame_status = FrameStatus(
+                        row["frame_status"]
+                    )
+                except ValueError as error:
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Invalid frame_status on CSV "
+                            f"line {line_number}: "
+                            f"{row['frame_status']}"
+                        )
+                    ) from error
+
+                try:
+                    record = RealtimeFrameRecord(
+                        architecture=(
+                            row["architecture"]
+                        ),
+                        algorithm=row["algorithm"],
+                        resolution=row["resolution"],
+                        trial=parse_required_integer(
+                            row["trial"],
+                            "trial",
+                            line_number,
+                        ),
+                        frame_index=(
+                            parse_required_integer(
+                                row["frame_index"],
+                                "frame_index",
+                                line_number,
+                            )
+                        ),
+                        scheduled_timestamp_ms=(
+                            parse_required_number(
+                                row[
+                                    "scheduled_timestamp_ms"
+                                ],
+                                "scheduled_timestamp_ms",
+                                line_number,
+                            )
+                        ),
+                        enqueued_timestamp_ms=(
+                            parse_optional_number(
+                                row[
+                                    "enqueued_timestamp_ms"
+                                ],
+                                "enqueued_timestamp_ms",
+                                line_number,
+                            )
+                        ),
+                        processing_start_timestamp_ms=(
+                            parse_optional_number(
+                                row[
+                                    "processing_start_timestamp_ms"
+                                ],
+                                (
+                                    "processing_start_"
+                                    "timestamp_ms"
+                                ),
+                                line_number,
+                            )
+                        ),
+                        processing_end_timestamp_ms=(
+                            parse_optional_number(
+                                row[
+                                    "processing_end_timestamp_ms"
+                                ],
+                                (
+                                    "processing_end_"
+                                    "timestamp_ms"
+                                ),
+                                line_number,
+                            )
+                        ),
+                        drop_timestamp_ms=(
+                            parse_optional_number(
+                                row["drop_timestamp_ms"],
+                                "drop_timestamp_ms",
+                                line_number,
+                            )
+                        ),
+                        source_delay_ms=(
+                            parse_optional_number(
+                                row["source_delay_ms"],
+                                "source_delay_ms",
+                                line_number,
+                            )
+                        ),
+                        queue_wait_time_ms=(
+                            parse_optional_number(
+                                row[
+                                    "queue_wait_time_ms"
+                                ],
+                                "queue_wait_time_ms",
+                                line_number,
+                            )
+                        ),
+                        processing_time_ms=(
+                            parse_optional_number(
+                                row[
+                                    "processing_time_ms"
+                                ],
+                                "processing_time_ms",
+                                line_number,
+                            )
+                        ),
+                        end_to_end_latency_ms=(
+                            parse_optional_number(
+                                row[
+                                    "end_to_end_latency_ms"
+                                ],
+                                "end_to_end_latency_ms",
+                                line_number,
+                            )
+                        ),
+                        deadline_ms=(
+                            parse_required_number(
+                                row["deadline_ms"],
+                                "deadline_ms",
+                                line_number,
+                            )
+                        ),
+                        deadline_missed=(
+                            parse_optional_boolean(
+                                row["deadline_missed"],
+                                "deadline_missed",
+                                line_number,
+                            )
+                        ),
+                        frame_status=frame_status,
+                    )
+                except ValueError as error:
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Invalid frame-results record "
+                            f"on CSV line {line_number}: "
+                            f"{error}"
+                        )
+                    ) from error
+
+                if (
+                    record.architecture
+                    != planned_run.architecture
+                ):
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Frame architecture does not "
+                            "match the planned run on "
+                            f"CSV line {line_number}."
+                        )
+                    )
+
+                if (
+                    record.algorithm
+                    != planned_run.algorithm
+                ):
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Frame algorithm does not "
+                            "match the planned run on "
+                            f"CSV line {line_number}."
+                        )
+                    )
+
+                if (
+                    record.resolution
+                    != expected_resolution
+                ):
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Frame resolution does not "
+                            "match the planned run on "
+                            f"CSV line {line_number}."
+                        )
+                    )
+
+                if (
+                    record.trial
+                    != planned_run.trial_number
+                ):
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Frame trial does not match "
+                            "the planned run on CSV line "
+                            f"{line_number}."
+                        )
+                    )
+
+                if not math.isclose(
+                    record.deadline_ms,
+                    planned_run.frame_deadline_ms,
+                    rel_tol=1e-9,
+                    abs_tol=1e-6,
+                ):
+                    raise (
+                        ControlledIlluminationRunBundleError(
+                            "Frame deadline does not "
+                            "match the planned run on "
+                            f"CSV line {line_number}."
+                        )
+                    )
+
+                records.append(record)
+
+    except UnicodeError as error:
+        raise ControlledIlluminationRunBundleError(
+            "Frame-results CSV is not valid UTF-8."
+        ) from error
+
+    if len(records) != summary.measured_frame_count:
+        raise ControlledIlluminationRunBundleError(
+            "Frame-results row count does not match "
+            "measured_frame_count. "
+            f"Expected: {summary.measured_frame_count}; "
+            f"actual: {len(records)}"
+        )
+
+    actual_frame_indices = [
+        record.frame_index
+        for record in records
+    ]
+    expected_frame_indices = list(
+        range(
+            1,
+            summary.measured_frame_count + 1,
+        )
+    )
+
+    if actual_frame_indices != expected_frame_indices:
+        raise ControlledIlluminationRunBundleError(
+            "Frame indices must be sequential, "
+            "unique and start at 1."
+        )
+
+    status_counts = Counter(
+        record.frame_status
+        for record in records
+    )
+
+    if (
+        status_counts[FrameStatus.PROCESSED]
+        != summary.processed_frame_count
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Processed-frame count does not match "
+            "the execution summary."
+        )
+
+    if (
+        status_counts[FrameStatus.DROPPED]
+        != summary.dropped_frame_count
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Dropped-frame count does not match "
+            "the execution summary."
+        )
+
+    if (
+        status_counts[FrameStatus.SKIPPED]
+        != summary.skipped_frame_count
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Skipped-frame count does not match "
+            "the execution summary."
+        )
+
+    deadline_miss_count = sum(
+        record.frame_status == FrameStatus.PROCESSED
+        and record.deadline_missed is True
+        for record in records
+    )
+    deadline_met_count = sum(
+        record.frame_status == FrameStatus.PROCESSED
+        and record.deadline_missed is False
+        for record in records
+    )
+
+    if (
+        deadline_miss_count
+        != summary.deadline_miss_count
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Deadline-miss count does not match "
+            "the execution summary."
+        )
+
+    if (
+        deadline_met_count
+        != summary.deadline_met_count
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Deadline-met count does not match "
             "the execution summary."
         )
 
@@ -1063,6 +1525,15 @@ def finalize_run_bundle_atomic(
     validate_summary_frame_hash(
         summary,
         artifacts,
+    )
+
+    validate_frame_results_against_run(
+        (
+                resolved_directory
+                / FRAME_RESULTS_FILE_NAME
+        ),
+        planned_run,
+        summary,
     )
 
     finalized_datetime = datetime.fromisoformat(

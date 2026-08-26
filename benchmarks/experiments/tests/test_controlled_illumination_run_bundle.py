@@ -39,6 +39,12 @@ from benchmarks.experiments.generate_dry_run_metadata import (
     build_dry_run_metadata,
 )
 
+from benchmarks.realtime.realtime_records import (
+    RealtimeRunContext,
+    create_processed_record,
+    write_frame_records,
+)
+
 
 VALID_TIMESTAMP = "2026-08-26T10:00:00Z"
 VALID_PLAN_SHA256 = "a" * 64
@@ -266,12 +272,70 @@ class ControlledIlluminationRunBundleTests(
             run_directory
             / FRAME_RESULTS_FILE_NAME
         )
-        frame_results_content = (
-            b"architecture,frame_index\n"
-            b"pure_python,1\n"
+
+        measured_frame_count = (
+            config["execution"]["measured_frames"]
         )
-        frame_results_path.write_bytes(
-            frame_results_content
+        origin_timestamp_ns = 1_000_000_000
+        frame_period_ns = 33_333_333
+
+        context = RealtimeRunContext(
+            architecture=planned_run.architecture,
+            algorithm=planned_run.algorithm,
+            resolution=(
+                f"{planned_run.resolution.width}"
+                f"x{planned_run.resolution.height}"
+            ),
+            trial=planned_run.trial_number,
+            origin_timestamp_ns=origin_timestamp_ns,
+            deadline_ms=planned_run.frame_deadline_ms,
+        )
+
+        records = []
+
+        for frame_index in range(
+                1,
+                measured_frame_count + 1,
+        ):
+            scheduled_timestamp_ns = (
+                    origin_timestamp_ns
+                    + (frame_index - 1) * frame_period_ns
+            )
+
+            records.append(
+                create_processed_record(
+                    context,
+                    frame_index=frame_index,
+                    scheduled_timestamp_ns=(
+                        scheduled_timestamp_ns
+                    ),
+                    enqueued_timestamp_ns=(
+                            scheduled_timestamp_ns
+                            + 1_000_000
+                    ),
+                    processing_start_timestamp_ns=(
+                            scheduled_timestamp_ns
+                            + 2_000_000
+                    ),
+                    processing_end_timestamp_ns=(
+                            scheduled_timestamp_ns
+                            + 7_000_000
+                    ),
+                )
+            )
+
+        written_record_count = write_frame_records(
+            records,
+            frame_results_path,
+        )
+
+        self.assertEqual(
+            written_record_count,
+            measured_frame_count,
+        )
+
+        frame_results_content = (
+            frame_results_path.read_bytes()
         )
 
         frame_results_sha256 = hashlib.sha256(

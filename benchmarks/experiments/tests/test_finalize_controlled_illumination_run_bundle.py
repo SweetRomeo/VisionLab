@@ -150,7 +150,6 @@ class FinalizeControlledIlluminationRunBundleTests(
             "run-directory/run_bundle_manifest.json"
         )
         manifest = SimpleNamespace(
-            validate_only=False,
             experiment_id="experiment-test",
             run_id="run-test-0001",
         )
@@ -219,27 +218,8 @@ class FinalizeControlledIlluminationRunBundleTests(
             captured_output.getvalue(),
         )
 
-        def test_argument_parser_accepts_validate_only(
-                self,
-        ) -> None:
-            arguments = create_argument_parser().parse_args(
-                [
-                    "--plan",
-                    "run_plan.json",
-                    "--run-directory",
-                    "run-directory",
-                    "--run-id",
-                    "run-test-0001",
-                    "--validate-only",
-                ]
-            )
-
-            self.assertTrue(
-                arguments.validate_only
-            )
-
     def test_run_cli_validates_without_finalizing(
-            self,
+        self,
     ) -> None:
         config = {"schema_version": 1}
         manifest = SimpleNamespace(

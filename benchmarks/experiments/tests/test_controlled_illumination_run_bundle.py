@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import json
 from dataclasses import asdict, replace
 import csv
+from unittest.mock import patch
 
 from benchmarks.experiments.controlled_illumination_run_bundle import (
     ControlledIlluminationRunBundleError,
@@ -1490,6 +1491,43 @@ class ControlledIlluminationRunBundleTests(
             self.assertEqual(
                 manifest.run_id,
                 planned_run.run_id,
+            )
+
+    def test_concurrent_manifest_publish_is_rejected(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            manifest = self.create_manifest()
+
+            with patch(
+                    (
+                            "benchmarks.experiments."
+                            "controlled_illumination_run_bundle."
+                            "os.link"
+                    ),
+                    side_effect=FileExistsError(
+                        "manifest already exists"
+                    ),
+            ):
+                with self.assertRaisesRegex(
+                        ControlledIlluminationRunBundleError,
+                        "already been finalized",
+                ):
+                    write_run_bundle_manifest_atomic(
+                        manifest,
+                        run_directory,
+                    )
+
+            temporary_files = list(
+                run_directory.glob(
+                    ".run_bundle_manifest.json.*.tmp"
+                )
+            )
+
+            self.assertEqual(
+                temporary_files,
+                [],
             )
 
 

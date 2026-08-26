@@ -1422,8 +1422,8 @@ def write_run_bundle_manifest_atomic(
 
     try:
         with temporary_path.open(
-            "x",
-            encoding="utf-8",
+                "x",
+                encoding="utf-8",
         ) as output_file:
             json.dump(
                 manifest.to_dict(),
@@ -1435,10 +1435,22 @@ def write_run_bundle_manifest_atomic(
             output_file.flush()
             os.fsync(output_file.fileno())
 
-        os.replace(
-            temporary_path,
-            output_path,
-        )
+        try:
+            os.link(
+                temporary_path,
+                output_path,
+            )
+        except FileExistsError as error:
+            raise ControlledIlluminationRunBundleError(
+                "Run bundle has already been "
+                f"finalized: {output_path}"
+            ) from error
+        except OSError as error:
+            raise ControlledIlluminationRunBundleError(
+                "Run bundle manifest could not be "
+                "published atomically: "
+                f"{error}"
+            ) from error
     finally:
         temporary_path.unlink(
             missing_ok=True,

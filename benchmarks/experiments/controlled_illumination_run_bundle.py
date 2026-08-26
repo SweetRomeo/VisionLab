@@ -1446,16 +1446,13 @@ def write_run_bundle_manifest_atomic(
 
     return output_path
 
-def finalize_run_bundle_atomic(
+def validate_run_bundle(
     run_directory: str | Path,
     planned_run: PlannedRun,
     config: dict[str, Any],
     run_plan_sha256: str,
     finalized_at_utc: str,
-) -> tuple[
-    ControlledIlluminationRunBundleManifest,
-    Path,
-]:
+) -> ControlledIlluminationRunBundleManifest:
     if not isinstance(planned_run, PlannedRun):
         raise ControlledIlluminationRunBundleError(
             "planned_run must be PlannedRun."
@@ -1575,10 +1572,30 @@ def finalize_run_bundle_atomic(
         )
     )
 
+    return manifest
+
+def finalize_run_bundle_atomic(
+    run_directory: str | Path,
+    planned_run: PlannedRun,
+    config: dict[str, Any],
+    run_plan_sha256: str,
+    finalized_at_utc: str,
+) -> tuple[
+    ControlledIlluminationRunBundleManifest,
+    Path,
+]:
+    manifest = validate_run_bundle(
+        run_directory,
+        planned_run,
+        config,
+        run_plan_sha256,
+        finalized_at_utc,
+    )
+
     manifest_path = (
         write_run_bundle_manifest_atomic(
             manifest,
-            resolved_directory,
+            run_directory,
         )
     )
 

@@ -11,6 +11,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
 from benchmarks.experiments.controlled_illumination_run_bundle import (
     ControlledIlluminationRunBundleError,
     finalize_run_bundle_atomic,
+    validate_run_bundle,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
     ControlledIlluminationRunPlan,
@@ -82,6 +83,14 @@ def create_argument_parser(
             "configuration path."
         ),
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help=(
+            "Validate the completed run bundle "
+            "without writing a bundle manifest."
+        ),
+    )
 
     return parser
 
@@ -106,6 +115,28 @@ def run_cli(
     run_plan_sha256 = calculate_run_plan_sha256(
         plan
     )
+    finalized_at_utc = now_provider()
+
+    if arguments.validate_only:
+        manifest = validate_run_bundle(
+            arguments.run_directory,
+            planned_run,
+            config,
+            run_plan_sha256,
+            finalized_at_utc,
+        )
+
+        print(
+            "Controlled-illumination run bundle "
+            "validation passed."
+        )
+        print(
+            f"Experiment ID: "
+            f"{manifest.experiment_id}"
+        )
+        print(f"Run ID: {manifest.run_id}")
+
+        return 0
 
     manifest, manifest_path = (
         finalize_run_bundle_atomic(
@@ -113,14 +144,21 @@ def run_cli(
             planned_run,
             config,
             run_plan_sha256,
-            now_provider(),
+            finalized_at_utc,
         )
     )
 
-    print("Controlled-illumination run finalized.")
-    print(f"Experiment ID: {manifest.experiment_id}")
+    print(
+        "Controlled-illumination run finalized."
+    )
+    print(
+        f"Experiment ID: "
+        f"{manifest.experiment_id}"
+    )
     print(f"Run ID: {manifest.run_id}")
-    print(f"Bundle manifest: {manifest_path}")
+    print(
+        f"Bundle manifest: {manifest_path}"
+    )
 
     return 0
 

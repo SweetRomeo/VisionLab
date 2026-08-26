@@ -28,6 +28,7 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
     write_run_bundle_manifest_atomic,
     finalize_run_bundle_atomic,
     validate_frame_results_against_run,
+    validate_run_bundle,
 )
 
 from benchmarks.experiments.controlled_illumination_metadata import (
@@ -1455,6 +1456,41 @@ class ControlledIlluminationRunBundleTests(
                     planned_run,
                     mismatched_summary,
                 )
+
+    def test_validation_does_not_write_manifest(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            manifest = validate_run_bundle(
+                run_directory,
+                planned_run,
+                config,
+                VALID_PLAN_SHA256,
+                "2026-08-26T11:00:00Z",
+            )
+
+            manifest_path = (
+                    run_directory
+                    / RUN_BUNDLE_MANIFEST_FILE_NAME
+            )
+
+            self.assertFalse(
+                manifest_path.exists()
+            )
+            self.assertEqual(
+                manifest.run_id,
+                planned_run.run_id,
+            )
 
 
 if __name__ == "__main__":

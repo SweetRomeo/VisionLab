@@ -92,6 +92,30 @@ class FinalizeControlledIlluminationRunBundleTests(
             "run-test-0001",
         )
         self.assertIsNone(arguments.config)
+        self.assertFalse(
+            arguments.validate_only
+        )
+
+    def test_argument_parser_accepts_validate_only(
+        self,
+    ) -> None:
+        arguments = (
+            create_argument_parser().parse_args(
+                [
+                    "--plan",
+                    "run_plan.json",
+                    "--run-directory",
+                    "run-directory",
+                    "--run-id",
+                    "run-test-0001",
+                    "--validate-only",
+                ]
+            )
+        )
+
+        self.assertTrue(
+            arguments.validate_only
+        )
 
     def test_planned_run_is_found(
         self,
@@ -126,6 +150,7 @@ class FinalizeControlledIlluminationRunBundleTests(
             "run-directory/run_bundle_manifest.json"
         )
         manifest = SimpleNamespace(
+            validate_only=False,
             experiment_id="experiment-test",
             run_id="run-test-0001",
         )
@@ -134,6 +159,7 @@ class FinalizeControlledIlluminationRunBundleTests(
             run_directory="run-directory",
             run_id="run-test-0001",
             config=None,
+            validate_only=False,
         )
 
         with (
@@ -190,6 +216,93 @@ class FinalizeControlledIlluminationRunBundleTests(
         )
         self.assertIn(
             str(manifest_path),
+            captured_output.getvalue(),
+        )
+
+        def test_argument_parser_accepts_validate_only(
+                self,
+        ) -> None:
+            arguments = create_argument_parser().parse_args(
+                [
+                    "--plan",
+                    "run_plan.json",
+                    "--run-directory",
+                    "run-directory",
+                    "--run-id",
+                    "run-test-0001",
+                    "--validate-only",
+                ]
+            )
+
+            self.assertTrue(
+                arguments.validate_only
+            )
+
+    def test_run_cli_validates_without_finalizing(
+            self,
+    ) -> None:
+        config = {"schema_version": 1}
+        manifest = SimpleNamespace(
+            experiment_id="experiment-test",
+            run_id="run-test-0001",
+        )
+        arguments = SimpleNamespace(
+            plan="run_plan.json",
+            run_directory="run-directory",
+            run_id="run-test-0001",
+            config=None,
+            validate_only=True,
+        )
+
+        with (
+            patch(
+                f"{MODULE_NAME}."
+                "load_controlled_illumination_config",
+                return_value=config,
+            ),
+            patch(
+                f"{MODULE_NAME}."
+                "load_run_plan_manifest",
+                return_value=self.plan,
+            ),
+            patch(
+                f"{MODULE_NAME}."
+                "calculate_run_plan_sha256",
+                return_value=PLAN_SHA256,
+            ),
+            patch(
+                f"{MODULE_NAME}."
+                "validate_run_bundle",
+                return_value=manifest,
+            ) as validate_bundle,
+            patch(
+                f"{MODULE_NAME}."
+                "finalize_run_bundle_atomic",
+            ) as finalize_bundle,
+        ):
+            captured_output = StringIO()
+
+            with redirect_stdout(captured_output):
+                exit_code = run_cli(
+                    arguments,
+                    now_provider=lambda: FINALIZED_AT,
+                )
+
+        self.assertEqual(exit_code, 0)
+        validate_bundle.assert_called_once_with(
+            "run-directory",
+            self.planned_run,
+            config,
+            PLAN_SHA256,
+            FINALIZED_AT,
+        )
+        finalize_bundle.assert_not_called()
+        self.assertIn(
+            "validation passed",
+            captured_output.getvalue(),
+        )
+        self.assertNotIn(
+            "Bundle manifest:",
             captured_output.getvalue(),
         )
 

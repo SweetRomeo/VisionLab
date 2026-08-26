@@ -14,6 +14,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     validate_safe_identifier,
     validate_utc_timestamp,
     ControlledIlluminationRunMetadata,
+    load_run_metadata,
 )
 from benchmarks.experiments.controlled_illumination_run_state import (
     validate_run_plan_sha256,
@@ -982,3 +983,132 @@ def write_run_bundle_manifest_atomic(
         )
 
     return output_path
+
+def finalize_run_bundle_atomic(
+    run_directory: str | Path,
+    planned_run: PlannedRun,
+    config: dict[str, Any],
+    run_plan_sha256: str,
+    finalized_at_utc: str,
+) -> tuple[
+    ControlledIlluminationRunBundleManifest,
+    Path,
+]:
+    if not isinstance(planned_run, PlannedRun):
+        raise ControlledIlluminationRunBundleError(
+            "planned_run must be PlannedRun."
+        )
+
+    if not isinstance(config, dict):
+        raise ControlledIlluminationRunBundleError(
+            "config must be a dictionary."
+        )
+
+    validated_finalized_at = (
+        validate_bundle_timestamp(
+            finalized_at_utc,
+            "finalized_at_utc",
+        )
+    )
+
+    try:
+        validated_plan_sha256 = (
+            validate_run_plan_sha256(
+                run_plan_sha256
+            )
+        )
+    except ValueError as error:
+        raise ControlledIlluminationRunBundleError(
+            str(error)
+        ) from error
+
+    resolved_directory = resolve_run_directory(
+        run_directory
+    )
+    metadata_path = (
+        resolved_directory
+        / RUN_METADATA_FILE_NAME
+    )
+
+    try:
+        metadata = load_run_metadata(
+            metadata_path,
+            config=config,
+        )
+    except (OSError, ValueError) as error:
+        raise ControlledIlluminationRunBundleError(
+            "Run metadata could not be loaded "
+            f"or validated: {error}"
+        ) from error
+
+    summary = load_execution_summary(
+        resolved_directory
+    )
+    artifacts = collect_bundle_artifacts(
+        resolved_directory
+    )
+
+    validate_execution_summary_matches_run(
+        summary,
+        planned_run,
+    )
+    validate_metadata_matches_run(
+        metadata,
+        planned_run,
+    )
+    validate_summary_counts_against_config(
+        summary,
+        config,
+    )
+    validate_summary_frame_hash(
+        summary,
+        artifacts,
+    )
+
+    finalized_datetime = datetime.fromisoformat(
+        validated_finalized_at.replace(
+            "Z",
+            "+00:00",
+        )
+    )
+    finished_datetime = datetime.fromisoformat(
+        summary.finished_at_utc.replace(
+            "Z",
+            "+00:00",
+        )
+    )
+
+    if finalized_datetime < finished_datetime:
+        raise ControlledIlluminationRunBundleError(
+            "finalized_at_utc cannot be earlier "
+            "than the execution finish time."
+        )
+
+    manifest = (
+        ControlledIlluminationRunBundleManifest(
+            schema_version=(
+                RUN_BUNDLE_SCHEMA_VERSION
+            ),
+            finalized_at_utc=(
+                validated_finalized_at
+            ),
+            experiment_id=(
+                planned_run.experiment_id
+            ),
+            run_id=planned_run.run_id,
+            run_plan_sha256=(
+                validated_plan_sha256
+            ),
+            metadata_dry_run=metadata.dry_run,
+            artifacts=artifacts,
+        )
+    )
+
+    manifest_path = (
+        write_run_bundle_manifest_atomic(
+            manifest,
+            resolved_directory,
+        )
+    )
+
+    return manifest, manifest_path

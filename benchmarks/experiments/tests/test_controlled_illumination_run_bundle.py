@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
+from dataclasses import asdict, replace
 
 from benchmarks.experiments.controlled_illumination_run_bundle import (
     ControlledIlluminationRunBundleError,
@@ -24,10 +25,12 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
     validate_summary_frame_hash,
     RUN_BUNDLE_MANIFEST_FILE_NAME,
     write_run_bundle_manifest_atomic,
+    finalize_run_bundle_atomic,
 )
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     load_controlled_illumination_config,
+    save_run_metadata_atomic,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
     PlannedRun,
@@ -249,6 +252,57 @@ class ControlledIlluminationRunBundleTests(
 
         return execution_summary_from_dict(
             summary_value
+        )
+
+    def prepare_finalizable_run(
+        self,
+        run_directory: Path,
+    ):
+        config, metadata, planned_run = (
+            self.create_metadata_and_planned_run()
+        )
+
+        frame_results_path = (
+            run_directory
+            / FRAME_RESULTS_FILE_NAME
+        )
+        frame_results_content = (
+            b"architecture,frame_index\n"
+            b"pure_python,1\n"
+        )
+        frame_results_path.write_bytes(
+            frame_results_content
+        )
+
+        frame_results_sha256 = hashlib.sha256(
+            frame_results_content
+        ).hexdigest()
+
+        summary = self.create_summary_for_run(
+            planned_run,
+            config,
+            frame_hash=frame_results_sha256,
+        )
+
+        self.write_execution_summary(
+            run_directory,
+            asdict(summary),
+        )
+
+        save_run_metadata_atomic(
+            metadata,
+            config=config,
+            output_path=(
+                run_directory
+                / RUN_METADATA_FILE_NAME
+            ),
+        )
+
+        return (
+            config,
+            metadata,
+            planned_run,
+            frame_results_path,
         )
 
     def write_execution_summary(
@@ -968,6 +1022,115 @@ class ControlledIlluminationRunBundleTests(
                 summary,
                 mismatched_config,
             )
+    def test_completed_run_bundle_is_finalized(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                config,
+                metadata,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            manifest, manifest_path = (
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T11:00:00Z",
+                )
+            )
+
+            stored_manifest = json.loads(
+                manifest_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+        self.assertEqual(
+            stored_manifest,
+            manifest.to_dict(),
+        )
+        self.assertEqual(
+            manifest.experiment_id,
+            planned_run.experiment_id,
+        )
+        self.assertEqual(
+            manifest.run_id,
+            planned_run.run_id,
+        )
+        self.assertEqual(
+            manifest.metadata_dry_run,
+            metadata.dry_run,
+        )
+
+    def test_modified_frame_results_are_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                config,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            frame_results_path.write_bytes(
+                b"modified frame results\n"
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                "SHA-256",
+            ):
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T11:00:00Z",
+                )
+
+            self.assertFalse(
+                (
+                    run_directory
+                    / RUN_BUNDLE_MANIFEST_FILE_NAME
+                ).exists()
+            )
+
+    def test_early_finalization_time_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                "cannot be earlier",
+            ):
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T09:59:00Z",
+                )
 
 
 if __name__ == "__main__":

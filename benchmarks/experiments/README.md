@@ -28,6 +28,10 @@ The infrastructure in this directory does not perform the physical experiment au
 | `manage_controlled_illumination_run.py`                   | Provides CLI commands for initializing, resuming and updating experiment execution progress.                    |
 | `tests/test_controlled_illumination_run_state.py`         | Tests state transitions, progress integrity, persistence and timestamp chronology.                              |
 | `tests/test_manage_controlled_illumination_run.py`        | Tests the controlled-illumination run-management CLI.                                                            |
+| `controlled_illumination_run_bundle.py` | Validates completed run artifacts and creates immutable run-bundle manifests. |
+| `finalize_controlled_illumination_run_bundle.py` | Provides the completed-run bundle finalization CLI. |
+| `tests/test_controlled_illumination_run_bundle.py` | Tests bundle models, artifact integrity, cross-file consistency and atomic finalization. |
+| `tests/test_finalize_controlled_illumination_run_bundle.py` | Tests finalization CLI selection and orchestration behavior. |
 
 ## Experiment phases
 
@@ -143,6 +147,9 @@ dry_run = true
 ```
 
 Dry-run records are infrastructure tests and must never be interpreted as physical experiment results.
+
+A bundle with `metadata_dry_run = true` is an infrastructure-validation artifact. It must not be interpreted as an official physical experiment
+or included in official controlled-illumination analysis.
 
 ## Output structure
 
@@ -801,3 +808,117 @@ being attempted again.
 Generated progress files and local runner configurations are
 experiment artifacts. Archive them together with the run plan,
 environment metadata and result files, but do not commit them to Git.
+
+## Finalizing completed run bundles
+
+After an architecture runner finishes successfully, finalize the run
+bundle before using its results in scientific analysis.
+
+A finalizable run directory must contain these required artifacts:
+
+```text
+realtime_frame_results.csv
+execution_summary.json
+run_metadata.json
+```
+
+The finalization process:
+
+1. Loads and validates the controlled-illumination configuration.
+2. Loads the selected run-plan manifest.
+3. Locates the requested planned run.
+4. Calculates the SHA-256 hash of the complete run plan.
+5. Validates the execution summary against the planned condition.
+6. Validates the run metadata against the planned condition.
+7. Validates warm-up and measured-frame counts.
+8. Validates the complete frame-results CSV, including row identities,
+   sequential frame indices, frame statuses and deadline statistics.
+9. Verifies the frame-results SHA-256 hash.
+10. Records each required artifact's SHA-256 hash and file size.
+11. Atomically publishes an immutable bundle manifest without
+    overwriting an existing manifest.
+
+Run the finalizer from the repository root:
+
+```bash
+python -m \
+benchmarks.experiments.finalize_controlled_illumination_run_bundle \
+--plan path/to/run_plan.json \
+--run-directory path/to/completed/run-directory \
+--run-id RUN_ID
+```
+
+Use a non-default experiment configuration when required:
+
+```bash
+python -m \
+benchmarks.experiments.finalize_controlled_illumination_run_bundle \
+--plan path/to/run_plan.json \
+--run-directory path/to/completed/run-directory \
+--run-id RUN_ID \
+--config path/to/controlled_illumination_config.json
+```
+
+### Validate without finalizing
+
+A completed run bundle can be validated without creating or modifying
+`run_bundle_manifest.json`:
+
+```bash
+python -m \
+benchmarks.experiments.finalize_controlled_illumination_run_bundle \
+--plan path/to/run_plan.json \
+--run-directory path/to/completed/run-directory \
+--run-id RUN_ID \
+--validate-only
+```
+
+A custom configuration can also be used in validation-only mode:
+
+```bash
+python -m \
+benchmarks.experiments.finalize_controlled_illumination_run_bundle \
+--plan path/to/run_plan.json \
+--run-directory path/to/completed/run-directory \
+--run-id RUN_ID \
+--config path/to/controlled_illumination_config.json \
+--validate-only
+```
+
+Validation-only mode performs the complete bundle validation but does
+not create, replace or modify any experiment artifact.
+
+A successful finalization creates:
+
+```text
+run_bundle_manifest.json
+```
+
+The manifest records:
+
+* Experiment and run identifiers
+* Finalization timestamp
+* Run-plan SHA-256 hash
+* Dry-run status
+* Required artifact names
+* Artifact SHA-256 hashes
+* Artifact sizes in bytes
+
+Finalization is rejected when:
+
+* A required artifact is missing or empty.
+* Metadata does not match the planned run.
+* The execution summary does not match the planned run.
+* Frame counts do not match the experiment configuration.
+* The frame-results CSV contains missing, duplicate or invalid frame records.
+* The frame-results hash does not match the execution summary.
+* The finalization timestamp precedes the execution finish time.
+* A bundle manifest already exists.
+
+A finalized bundle must not be modified. If an artifact must be
+recreated, create a new run with a new run identifier instead of
+overwriting the finalized bundle.
+
+Generated bundle manifests and run artifacts must not be committed to
+Git. Archive them together with the run plan, progress file,
+configuration and environment metadata.

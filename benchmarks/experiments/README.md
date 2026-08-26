@@ -148,6 +148,9 @@ dry_run = true
 
 Dry-run records are infrastructure tests and must never be interpreted as physical experiment results.
 
+A bundle with `metadata_dry_run = true` is an infrastructure-validation artifact. It must not be interpreted as an official physical experiment
+or included in official controlled-illumination analysis.
+
 ## Output structure
 
 By default, metadata files are written under:
@@ -828,9 +831,12 @@ The finalization process:
 5. Validates the execution summary against the planned condition.
 6. Validates the run metadata against the planned condition.
 7. Validates warm-up and measured-frame counts.
-8. Verifies the frame-results SHA-256 hash.
-9. Records each artifact's SHA-256 hash and file size.
-10. Atomically writes an immutable bundle manifest.
+8. Validates the complete frame-results CSV, including row identities,
+   sequential frame indices, frame statuses and deadline statistics.
+9. Verifies the frame-results SHA-256 hash.
+10. Records each required artifact's SHA-256 hash and file size.
+11. Atomically publishes an immutable bundle manifest without
+    overwriting an existing manifest.
 
 Run the finalizer from the repository root:
 
@@ -852,6 +858,35 @@ benchmarks.experiments.finalize_controlled_illumination_run_bundle \
 --run-id RUN_ID \
 --config path/to/controlled_illumination_config.json
 ```
+
+### Validate without finalizing
+
+A completed run bundle can be validated without creating or modifying
+`run_bundle_manifest.json`:
+
+```bash
+python -m \
+benchmarks.experiments.finalize_controlled_illumination_run_bundle \
+--plan path/to/run_plan.json \
+--run-directory path/to/completed/run-directory \
+--run-id RUN_ID \
+--validate-only
+```
+
+A custom configuration can also be used in validation-only mode:
+
+```bash
+python -m \
+benchmarks.experiments.finalize_controlled_illumination_run_bundle \
+--plan path/to/run_plan.json \
+--run-directory path/to/completed/run-directory \
+--run-id RUN_ID \
+--config path/to/controlled_illumination_config.json \
+--validate-only
+```
+
+Validation-only mode performs the complete bundle validation but does
+not create, replace or modify any experiment artifact.
 
 A successful finalization creates:
 
@@ -875,6 +910,7 @@ Finalization is rejected when:
 * Metadata does not match the planned run.
 * The execution summary does not match the planned run.
 * Frame counts do not match the experiment configuration.
+* The frame-results CSV contains missing, duplicate or invalid frame records.
 * The frame-results hash does not match the execution summary.
 * The finalization timestamp precedes the execution finish time.
 * A bundle manifest already exists.

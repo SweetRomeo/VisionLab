@@ -38,6 +38,7 @@ from benchmarks.realtime.realtime_records import (
 )
 
 RUN_BUNDLE_SCHEMA_VERSION = 1
+TIMING_ABS_TOLERANCE_MS = 1e-6
 
 RUN_METADATA_FILE_NAME = "run_metadata.json"
 
@@ -289,6 +290,83 @@ def validate_summary_frame_hash(
             "Frame-results SHA-256 does not match "
             "the execution summary."
         )
+
+def validate_derived_timing(
+        record: RealtimeFrameRecord,
+        field_name: str,
+        expected_value: float,
+) -> None:
+    actual_value = getattr(record, field_name)
+
+    if (
+            actual_value is None
+            or not math.isclose(
+        actual_value,
+        expected_value,
+        rel_tol=0.0,
+        abs_tol=TIMING_ABS_TOLERANCE_MS,
+    )
+    ):
+        raise ControlledIlluminationRunBundleError(
+            f"Frame {record.frame_index} {field_name} "
+            "does not match its timestamp-derived "
+            "value."
+        )
+
+def validate_frame_timing_consistency(
+    record: RealtimeFrameRecord,
+) -> None:
+    if record.frame_status is FrameStatus.SKIPPED:
+        return
+
+    if record.enqueued_timestamp_ms is None:
+        raise ControlledIlluminationRunBundleError(
+            f"Frame {record.frame_index} is missing "
+            "its enqueue timestamp."
+        )
+
+    validate_derived_timing(
+        record,
+        "source_delay_ms",
+        (
+            record.enqueued_timestamp_ms
+            - record.scheduled_timestamp_ms
+        ),
+    )
+
+    if record.frame_status is FrameStatus.DROPPED:
+        return
+
+    if (
+        record.processing_start_timestamp_ms is None
+        or record.processing_end_timestamp_ms is None
+    ):
+        raise ControlledIlluminationRunBundleError(
+            f"Frame {record.frame_index} is missing "
+            "processing timestamps."
+        )
+
+    processing_start_ms = (
+        record.processing_start_timestamp_ms
+    )
+    processing_end_ms = (
+        record.processing_end_timestamp_ms
+    )
+
+    validate_derived_timing(
+        record,
+        "queue_wait_time_ms",
+        (
+            processing_start_ms
+            - record.enqueued_timestamp_ms
+        ),
+    )
+
+    validate_derived_timing(
+        record,
+        "processing_time_ms",
+        processing_end_ms - processing_start_ms,
+    )
 
 def validate_frame_results_against_run(
     frame_results_path: Path,
@@ -652,6 +730,10 @@ def validate_frame_results_against_run(
                         )
                     )
 
+                validate_frame_timing_consistency(
+                    record,
+                )
+
                 records.append(record)
 
     except UnicodeError as error:
@@ -744,6 +826,7 @@ def validate_frame_results_against_run(
             "Deadline-met count does not match "
             "the execution summary."
         )
+
 
 def validate_bundle_identifier(
     value: Any,

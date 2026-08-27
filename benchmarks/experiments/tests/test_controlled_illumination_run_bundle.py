@@ -435,6 +435,49 @@ class ControlledIlluminationRunBundleTests(
 
         return output_path
 
+    def assert_frame_result_field_is_rejected(
+        self,
+        field_name: str,
+        replacement_value: str,
+        expected_message: str,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            rows[0][field_name] = replacement_value
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                expected_message,
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    summary,
+                )
+
     def test_valid_manifest_is_serialized(
         self,
     ) -> None:
@@ -1262,6 +1305,33 @@ class ControlledIlluminationRunBundleTests(
                 planned_run,
                 summary,
             )
+
+    def test_inconsistent_source_delay_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "source_delay_ms",
+            "2.0",
+            "source_delay_ms",
+        )
+
+    def test_inconsistent_queue_wait_time_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "queue_wait_time_ms",
+            "2.0",
+            "queue_wait_time_ms",
+        )
+        
+    def test_inconsistent_processing_time_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "processing_time_ms",
+            "6.0",
+            "processing_time_ms",
+        )
 
     def test_duplicate_frame_index_is_rejected(
             self,

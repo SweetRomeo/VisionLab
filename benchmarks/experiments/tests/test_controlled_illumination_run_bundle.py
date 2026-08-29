@@ -1,4 +1,4 @@
-from dataclasses import replace
+
 import unittest
 import hashlib
 from pathlib import Path
@@ -434,6 +434,93 @@ class ControlledIlluminationRunBundleTests(
             output_file.write("\n")
 
         return output_path
+
+    def assert_frame_result_field_is_rejected(
+        self,
+        field_name: str,
+        replacement_value: str,
+        expected_message: str,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            rows[0][field_name] = replacement_value
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                expected_message,
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    summary,
+                )
+
+    def assert_summary_mean_is_rejected(
+        self,
+        field_name: str,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            actual_mean = getattr(
+                summary,
+                field_name,
+            )
+
+            if actual_mean is None:
+                self.fail(
+                    f"{field_name} unexpectedly null."
+                )
+
+            mismatched_summary = replace(
+                summary,
+                **{
+                    field_name: actual_mean + 1.0,
+                },
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                field_name,
+            ):
+                validate_frame_results_against_run(
+                    frame_results_path,
+                    planned_run,
+                    mismatched_summary,
+                )
 
     def test_valid_manifest_is_serialized(
         self,
@@ -1263,6 +1350,33 @@ class ControlledIlluminationRunBundleTests(
                 summary,
             )
 
+    def test_inconsistent_source_delay_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "source_delay_ms",
+            "2.0",
+            "source_delay_ms",
+        )
+
+    def test_inconsistent_queue_wait_time_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "queue_wait_time_ms",
+            "2.0",
+            "queue_wait_time_ms",
+        )
+
+    def test_inconsistent_processing_time_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "processing_time_ms",
+            "6.0",
+            "processing_time_ms",
+        )
+
     def test_duplicate_frame_index_is_rejected(
             self,
     ) -> None:
@@ -1530,6 +1644,207 @@ class ControlledIlluminationRunBundleTests(
                 [],
             )
 
+    def test_inconsistent_end_to_end_latency_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "end_to_end_latency_ms",
+            "8.0",
+            "end_to_end_latency_ms",
+        )
+
+    def test_incorrect_deadline_classification_is_rejected(
+        self,
+    ) -> None:
+        self.assert_frame_result_field_is_rejected(
+            "deadline_missed",
+            "true",
+            "deadline_missed",
+        )
+
+    def test_incorrect_mean_processing_time_is_rejected(
+        self,
+    ) -> None:
+        self.assert_summary_mean_is_rejected(
+            "mean_processing_time_ms",
+        )
+
+    def test_incorrect_mean_end_to_end_latency_is_rejected(
+        self,
+    ) -> None:
+        self.assert_summary_mean_is_rejected(
+            "mean_end_to_end_latency_ms",
+        )
+
+    def test_six_decimal_timing_tolerance_is_accepted(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            rows[0]["source_delay_ms"] = "1.000001"
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            rounded_summary = replace(
+                summary,
+                mean_processing_time_ms=(
+                    summary.mean_processing_time_ms
+                    + 0.0000005
+                ),
+                mean_end_to_end_latency_ms=(
+                    summary.mean_end_to_end_latency_ms
+                    + 0.0000005
+                ),
+            )
+
+            validate_frame_results_against_run(
+                frame_results_path,
+                planned_run,
+                rounded_summary,
+            )
+
+    def test_zero_processed_frames_accept_null_means(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            for row in rows:
+                row["drop_timestamp_ms"] = (
+                    row["processing_start_timestamp_ms"]
+                )
+
+                for field_name in (
+                    "processing_start_timestamp_ms",
+                    "processing_end_timestamp_ms",
+                    "queue_wait_time_ms",
+                    "processing_time_ms",
+                    "end_to_end_latency_ms",
+                    "deadline_missed",
+                ):
+                    row[field_name] = ""
+
+                row["frame_status"] = "dropped"
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            dropped_summary = replace(
+                summary,
+                processed_frame_count=0,
+                dropped_frame_count=(
+                    summary.measured_frame_count
+                ),
+                deadline_met_count=0,
+                mean_processing_time_ms=None,
+                mean_end_to_end_latency_ms=None,
+            )
+
+            validate_frame_results_against_run(
+                frame_results_path,
+                planned_run,
+                dropped_summary,
+            )
+
+    def test_skipped_frame_status_fields_remain_valid(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+            (
+                _,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+            summary = load_execution_summary(
+                run_directory
+            )
+            fieldnames, rows = (
+                self.read_frame_result_rows(
+                    frame_results_path
+                )
+            )
+
+            for field_name in (
+                "enqueued_timestamp_ms",
+                "processing_start_timestamp_ms",
+                "processing_end_timestamp_ms",
+                "drop_timestamp_ms",
+                "source_delay_ms",
+                "queue_wait_time_ms",
+                "processing_time_ms",
+                "end_to_end_latency_ms",
+                "deadline_missed",
+            ):
+                rows[0][field_name] = ""
+
+            rows[0]["frame_status"] = "skipped"
+
+            self.write_frame_result_rows(
+                frame_results_path,
+                fieldnames,
+                rows,
+            )
+
+            skipped_summary = replace(
+                summary,
+                processed_frame_count=(
+                    summary.processed_frame_count - 1
+                ),
+                skipped_frame_count=1,
+                deadline_met_count=(
+                    summary.deadline_met_count - 1
+                ),
+            )
+
+            validate_frame_results_against_run(
+                frame_results_path,
+                planned_run,
+                skipped_summary,
+            )
 
 if __name__ == "__main__":
     unittest.main()

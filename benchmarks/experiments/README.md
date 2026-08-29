@@ -832,10 +832,15 @@ The finalization process:
 6. Validates the run metadata against the planned condition.
 7. Validates warm-up and measured-frame counts.
 8. Validates the complete frame-results CSV, including row identities,
-   sequential frame indices, frame statuses and deadline statistics.
-9. Verifies the frame-results SHA-256 hash.
-10. Records each required artifact's SHA-256 hash and file size.
-11. Atomically publishes an immutable bundle manifest without
+   sequential frame indices, frame statuses, timestamp-derived timings,
+   deadline classifications and deadline statistics. Derived timings and
+   summary means use a `1e-6 ms` absolute tolerance to accommodate the
+   CSV's six-decimal serialization.
+9. Recomputes mean processing time and mean end-to-end latency from the
+   processed frame records and checks them against the execution summary.
+10. Verifies the frame-results SHA-256 hash.
+11. Records each required artifact's SHA-256 hash and file size.
+12. Atomically publishes an immutable bundle manifest without
     overwriting an existing manifest.
 
 Run the finalizer from the repository root:
@@ -911,6 +916,8 @@ Finalization is rejected when:
 * The execution summary does not match the planned run.
 * Frame counts do not match the experiment configuration.
 * The frame-results CSV contains missing, duplicate or invalid frame records.
+* Timestamp-derived timings, deadline classification or summary means are
+  inconsistent with the frame-level records.
 * The frame-results hash does not match the execution summary.
 * The finalization timestamp precedes the execution finish time.
 * A bundle manifest already exists.

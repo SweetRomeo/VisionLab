@@ -1367,7 +1367,7 @@ class ControlledIlluminationRunBundleTests(
             "2.0",
             "queue_wait_time_ms",
         )
-        
+
     def test_inconsistent_processing_time_is_rejected(
         self,
     ) -> None:
@@ -1652,7 +1652,7 @@ class ControlledIlluminationRunBundleTests(
             "8.0",
             "end_to_end_latency_ms",
         )
-        
+
     def test_incorrect_deadline_classification_is_rejected(
         self,
     ) -> None:

@@ -293,20 +293,20 @@ def validate_summary_frame_hash(
         )
 
 def validate_derived_timing(
-        record: RealtimeFrameRecord,
-        field_name: str,
-        expected_value: float,
+    record: RealtimeFrameRecord,
+    field_name: str,
+    expected_value: float,
 ) -> None:
     actual_value = getattr(record, field_name)
 
     if (
-            actual_value is None
-            or not math.isclose(
-        actual_value,
-        expected_value,
-        rel_tol=0.0,
-        abs_tol=TIMING_ABS_TOLERANCE_MS,
-    )
+        actual_value is None
+        or not math.isclose(
+            actual_value,
+            expected_value,
+            rel_tol=0.0,
+            abs_tol=TIMING_ABS_TOLERANCE_MS,
+        )
     ):
         raise ControlledIlluminationRunBundleError(
             f"Frame {record.frame_index} {field_name} "

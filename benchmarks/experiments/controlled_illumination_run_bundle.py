@@ -9,6 +9,7 @@ import math
 import os
 from uuid import uuid4
 from collections import Counter
+from statistics import fmean
 import csv
 
 from benchmarks.experiments.controlled_illumination_metadata import (
@@ -315,6 +316,7 @@ def validate_derived_timing(
 
 def validate_frame_timing_consistency(
     record: RealtimeFrameRecord,
+    frame_deadline_ms: float,
 ) -> None:
     if record.frame_status is FrameStatus.SKIPPED:
         return
@@ -367,6 +369,82 @@ def validate_frame_timing_consistency(
         "processing_time_ms",
         processing_end_ms - processing_start_ms,
     )
+
+    expected_end_to_end_latency_ms = (
+        processing_end_ms
+        - record.scheduled_timestamp_ms
+    )
+
+    validate_derived_timing(
+        record,
+        "end_to_end_latency_ms",
+        expected_end_to_end_latency_ms,
+    )
+
+    expected_deadline_missed = (
+        expected_end_to_end_latency_ms
+        > frame_deadline_ms
+    )
+
+    if (
+        record.deadline_missed
+        is not expected_deadline_missed
+    ):
+        raise ControlledIlluminationRunBundleError(
+            f"Frame {record.frame_index} "
+            "deadline_missed does not match the "
+            "timestamp-derived latency and configured "
+            "frame deadline."
+        )
+
+def validate_summary_timing_mean(
+    records: list[RealtimeFrameRecord],
+    summary: ControlledIlluminationExecutionSummary,
+    timing_field: str,
+    summary_field: str,
+) -> None:
+    timing_values = [
+        getattr(record, timing_field)
+        for record in records
+        if record.frame_status is FrameStatus.PROCESSED
+    ]
+
+    if not timing_values:
+        return
+
+    if any(
+        value is None
+        for value in timing_values
+    ):
+        raise ControlledIlluminationRunBundleError(
+            "Processed frame records are missing "
+            f"{timing_field}."
+        )
+
+    expected_mean = fmean(
+        value
+        for value in timing_values
+        if value is not None
+    )
+    actual_mean = getattr(
+        summary,
+        summary_field,
+    )
+
+    if (
+        actual_mean is None
+        or not math.isclose(
+            actual_mean,
+            expected_mean,
+            rel_tol=0.0,
+            abs_tol=TIMING_ABS_TOLERANCE_MS,
+        )
+    ):
+        raise ControlledIlluminationRunBundleError(
+            f"Execution-summary {summary_field} "
+            "does not match the processed frame "
+            "records."
+        )
 
 def validate_frame_results_against_run(
     frame_results_path: Path,
@@ -732,6 +810,7 @@ def validate_frame_results_against_run(
 
                 validate_frame_timing_consistency(
                     record,
+                    planned_run.frame_deadline_ms,
                 )
 
                 records.append(record)
@@ -797,6 +876,20 @@ def validate_frame_results_against_run(
             "Skipped-frame count does not match "
             "the execution summary."
         )
+
+    validate_summary_timing_mean(
+        records,
+        summary,
+        "processing_time_ms",
+        "mean_processing_time_ms",
+    )
+
+    validate_summary_timing_mean(
+        records,
+        summary,
+        "end_to_end_latency_ms",
+        "mean_end_to_end_latency_ms",
+    )
 
     deadline_miss_count = sum(
         record.frame_status == FrameStatus.PROCESSED

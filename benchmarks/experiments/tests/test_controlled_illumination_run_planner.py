@@ -302,7 +302,6 @@ class ControlledIlluminationRunPlannerTests(
         ):
             build_run_conditions(config)
 
-
     def test_complete_experiment_matrix_is_expanded(
             self,
     ) -> None:

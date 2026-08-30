@@ -25,6 +25,10 @@ from benchmarks.experiments.controlled_illumination_runner_context import (
     ControlledIlluminationRunnerContext,
 )
 
+from benchmarks.experiments import (
+    controlled_illumination_pure_python_runner
+    as pure_python_runner,
+)
 
 RUNNER_MODULE = (
     "benchmarks.experiments."
@@ -247,8 +251,11 @@ class ControlledIlluminationPurePythonRunnerTests(
         }
         processor = object()
         frame_source = object()
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "2",
+        }
         records = (object(),)
-        video_path = Path("benchmark_input.mp4")
         expected_paths = (
             Path("realtime_frame_results.csv"),
             Path("execution_summary.json"),
@@ -297,14 +304,9 @@ class ControlledIlluminationPurePythonRunnerTests(
             ),
             patch(
                 f"{RUNNER_MODULE}."
-                "resolve_video_path",
-                return_value=video_path,
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "iter_video_frames",
+                "create_frame_source",
                 return_value=frame_source,
-            ),
+            ) as create_source,
             patch(
                 f"{RUNNER_MODULE}."
                 "run_realtime_trial",
@@ -317,9 +319,10 @@ class ControlledIlluminationPurePythonRunnerTests(
             ) as write_artifacts,
         ):
             actual_paths = execute_pure_python_run(
+                environment,
                 now_provider=lambda: next(
                     timestamps
-                )
+                ),
             )
 
         self.assertEqual(
@@ -327,8 +330,12 @@ class ControlledIlluminationPurePythonRunnerTests(
             expected_paths,
         )
         load_context.assert_called_once_with(
-            None,
+            environment,
             expected_architecture="pure_python",
+        )
+        create_source.assert_called_once_with(
+            benchmark_config,
+            environment=environment,
         )
         run_trial.assert_called_once_with(
             frame_source=frame_source,
@@ -395,6 +402,247 @@ class ControlledIlluminationPurePythonRunnerTests(
             captured_output.getvalue(),
         )
 
+    def test_video_input_is_default(
+        self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+        video_path = Path(
+            "benchmark_input.mp4"
+        )
+        frame_source = object()
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "resolve_video_path",
+                return_value=video_path,
+            ) as resolve_video,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_video_frames",
+                return_value=frame_source,
+            ) as iter_video,
+        ):
+            selected_source = (
+                pure_python_runner
+                .create_frame_source(
+                    benchmark_config,
+                    environment={},
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+        resolve_video.assert_called_once_with(
+            benchmark_config
+        )
+        iter_video.assert_called_once_with(
+            video_path
+        )
+
+    def test_unsupported_input_source_is_rejected(
+        self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "resolve_video_path",
+                return_value=Path(
+                    "benchmark_input.mp4"
+                ),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_video_frames",
+                return_value=object(),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "Unsupported input source: usb",
+            ):
+                pure_python_runner.create_frame_source(
+                    benchmark_config,
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "usb",
+                    },
+                )
+
+    def test_camera_input_uses_configured_index(
+        self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+        frame_source = object()
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+                create=True,
+                return_value=frame_source,
+            ) as iter_camera,
+            patch(
+                f"{RUNNER_MODULE}."
+                "resolve_video_path",
+            ) as resolve_video,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_video_frames",
+            ) as iter_video,
+        ):
+            selected_source = (
+                pure_python_runner
+                .create_frame_source(
+                    benchmark_config,
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": (
+                            "camera"
+                        ),
+                        "VISIONLAB_CAMERA_INDEX": "2",
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+        iter_camera.assert_called_once_with(
+            2
+        )
+        resolve_video.assert_not_called()
+        iter_video.assert_not_called()
+
+    def test_invalid_camera_index_configuration_is_rejected(
+        self,
+    ) -> None:
+        invalid_indices = (
+            None,
+            "",
+            "-1",
+            "1.5",
+            "camera-zero",
+        )
+
+        for invalid_index in invalid_indices:
+            with self.subTest(
+                camera_index=invalid_index
+            ):
+                environment = {
+                    "VISIONLAB_INPUT_SOURCE": (
+                        "camera"
+                    ),
+                }
+
+                if invalid_index is not None:
+                    environment[
+                        "VISIONLAB_CAMERA_INDEX"
+                    ] = invalid_index
+
+                with patch(
+                    f"{RUNNER_MODULE}."
+                    "iter_camera_frames",
+                ) as iter_camera:
+                    with self.assertRaisesRegex(
+                        ControlledIlluminationPurePythonRunnerError,
+                        (
+                            "VISIONLAB_CAMERA_INDEX "
+                            "must be a non-negative "
+                            "integer"
+                        ),
+                    ):
+                        (
+                            pure_python_runner
+                            .create_frame_source(
+                                {},
+                                environment=environment,
+                            )
+                        )
+
+                iter_camera.assert_not_called()
+
+    def test_failed_camera_run_does_not_write_artifacts(
+        self,
+    ) -> None:
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "0",
+        }
+        realtime_config = SimpleNamespace(
+            warmup_frames=30,
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                side_effect=RuntimeError(
+                    "Camera 0 could not be opened."
+                ),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+            ) as write_artifacts,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Camera 0 could not be opened",
+            ):
+                execute_pure_python_run(
+                    environment,
+                    now_provider=lambda: STARTED_AT,
+                )
+
+        write_artifacts.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

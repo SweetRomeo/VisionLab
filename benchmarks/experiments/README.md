@@ -779,6 +779,51 @@ controlled-illumination measurements. Official lux- and angle-dependent
 experiments require the live-camera input adapter and calibrated
 illumination hardware.
 
+#### Pure Python live-camera input
+
+The controlled-illumination Pure Python runner supports deterministic
+video and live-camera input.
+
+Deterministic video remains the default:
+
+```text
+VISIONLAB_INPUT_SOURCE=video
+```
+
+Video input uses the path configured by `input.video_path` in the
+benchmark configuration.
+
+Select a live camera through the Pure Python runner environment:
+
+```json
+{
+  "environment": {
+    "VISIONLAB_INPUT_SOURCE": "camera",
+    "VISIONLAB_CAMERA_INDEX": "0"
+  }
+}
+```
+
+`VISIONLAB_CAMERA_INDEX` must contain a non-negative integer identifying
+the OpenCV capture device. It is required only when
+`VISIONLAB_INPUT_SOURCE=camera`.
+
+The runner rejects unsupported input-source values, missing camera
+indices, negative indices and non-integer indices before starting the
+trial. Camera-open, frame-read and empty-frame failures abort the run
+without writing completed-run artifacts. The OpenCV capture device is
+released when the frame iterator finishes or fails.
+
+Live-camera input is currently supported only by the Pure Python
+controlled-illumination runner. The Hybrid and Pure C++ runners continue
+to use the deterministic benchmark video.
+
+A successful live-camera run verifies capture and processing
+integration only. It must not be interpreted as an official physical
+controlled-illumination experiment until exposure, sensor gain or ISO,
+white balance, focus, frame rate, resolution and calibration have been
+configured and verified according to the experiment protocol.
+
 ### Run environment
 
 The orchestrator passes the selected condition to the architecture

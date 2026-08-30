@@ -4,6 +4,9 @@ from pathlib import Path
 from threading import Event
 
 import numpy as np
+from unittest.mock import Mock, patch
+
+from benchmarks.realtime import realtime_pipeline
 
 from benchmarks.realtime.realtime_config import (
     RealtimeConfig,
@@ -295,6 +298,199 @@ class RealtimePipelineTests(unittest.TestCase):
         ):
             next(frame_iterator)
 
+    def test_camera_open_failure_is_rejected(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = False
+
+        with patch.object(
+            realtime_pipeline.cv2,
+            "VideoCapture",
+            return_value=capture,
+        ) as video_capture:
+            frame_iterator = (
+                realtime_pipeline.iter_camera_frames(
+                    0
+                )
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Camera 0 could not be opened",
+            ):
+                next(frame_iterator)
+
+        video_capture.assert_called_once_with(0)
+        capture.release.assert_called_once_with()
+
+    def test_camera_frame_is_yielded_and_released(
+        self,
+    ) -> None:
+        expected_frame = self.create_frames(
+            1
+        )[0]
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            expected_frame,
+        )
+
+        with patch.object(
+            realtime_pipeline.cv2,
+            "VideoCapture",
+            return_value=capture,
+        ):
+            frame_iterator = (
+                realtime_pipeline.iter_camera_frames(
+                    0
+                )
+            )
+
+            actual_frame = next(
+                frame_iterator
+            )
+            frame_iterator.close()
+
+        self.assertIs(
+            actual_frame,
+            expected_frame,
+        )
+        capture.read.assert_called_once_with()
+        capture.release.assert_called_once_with()
+
+    def test_empty_camera_frame_is_rejected(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            np.empty(
+                (0, 0, 3),
+                dtype=np.uint8,
+            ),
+        )
+
+        with patch.object(
+            realtime_pipeline.cv2,
+            "VideoCapture",
+            return_value=capture,
+        ):
+            frame_iterator = (
+                realtime_pipeline.iter_camera_frames(
+                    0
+                )
+            )
+
+            try:
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "empty frame",
+                ):
+                    next(frame_iterator)
+            finally:
+                frame_iterator.close()
+
+        capture.release.assert_called_once_with()
+
+    def test_camera_frame_read_failure_is_rejected(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            False,
+            None,
+        )
+
+        with patch.object(
+            realtime_pipeline.cv2,
+            "VideoCapture",
+            return_value=capture,
+        ):
+            frame_iterator = (
+                realtime_pipeline.iter_camera_frames(
+                    2
+                )
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                (
+                    "could not be read "
+                    "from camera 2"
+                ),
+            ):
+                next(frame_iterator)
+
+        capture.release.assert_called_once_with()
+
+    def test_negative_camera_index_is_rejected_before_open(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = False
+
+        with patch.object(
+            realtime_pipeline.cv2,
+            "VideoCapture",
+            return_value=capture,
+        ) as video_capture:
+            frame_iterator = (
+                realtime_pipeline.iter_camera_frames(
+                    -1
+                )
+            )
+
+            with self.assertRaisesRegex(
+                ValueError,
+                (
+                    "camera_index must be a "
+                    "non-negative integer"
+                ),
+            ):
+                next(frame_iterator)
+
+        video_capture.assert_not_called()
+
+    def test_non_integer_camera_indices_are_rejected_before_open(
+        self,
+    ) -> None:
+        invalid_indices = (
+            True,
+            1.5,
+            "0",
+            None,
+        )
+
+        with patch.object(
+            realtime_pipeline.cv2,
+            "VideoCapture",
+        ) as video_capture:
+            for invalid_index in invalid_indices:
+                with self.subTest(
+                    camera_index=invalid_index
+                ):
+                    frame_iterator = (
+                        realtime_pipeline
+                        .iter_camera_frames(
+                            invalid_index
+                        )
+                    )
+
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        (
+                            "camera_index must be a "
+                            "non-negative integer"
+                        ),
+                    ):
+                        next(frame_iterator)
+
+        video_capture.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

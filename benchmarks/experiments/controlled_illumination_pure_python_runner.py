@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 import math
+import os
 import sys
 from typing import Any
+
 
 from benchmarks.experiments.controlled_illumination_run_artifacts import (
     write_completed_run_artifacts_atomic,
@@ -28,12 +30,23 @@ from benchmarks.realtime.realtime_experiment_plan import (
     validate_shared_execution_counts,
 )
 from benchmarks.realtime.realtime_pipeline import (
+    iter_camera_frames,
     iter_video_frames,
     run_realtime_trial,
 )
 
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
+
+INPUT_SOURCE_VARIABLE = (
+    "VISIONLAB_INPUT_SOURCE"
+)
+
+VIDEO_INPUT_SOURCE = "video"
+CAMERA_INPUT_SOURCE = "camera"
+CAMERA_INDEX_VARIABLE = (
+    "VISIONLAB_CAMERA_INDEX"
+)
 
 
 class ControlledIlluminationPurePythonRunnerError(
@@ -47,6 +60,86 @@ def current_utc_timestamp() -> str:
         datetime.now(timezone.utc)
         .isoformat()
         .replace("+00:00", "Z")
+    )
+
+
+def create_frame_source(
+    benchmark_config: dict[str, Any],
+    *,
+    environment: Mapping[str, str] | None = None,
+) -> Any:
+    active_environment = (
+        os.environ
+        if environment is None
+        else environment
+    )
+
+    raw_input_source = active_environment.get(
+        INPUT_SOURCE_VARIABLE,
+        VIDEO_INPUT_SOURCE,
+    )
+
+    if (
+        not isinstance(raw_input_source, str)
+        or not raw_input_source.strip()
+    ):
+        raise ControlledIlluminationPurePythonRunnerError(
+            f"{INPUT_SOURCE_VARIABLE} must contain "
+            "a non-empty string."
+        )
+
+    input_source = (
+        raw_input_source.strip().lower()
+    )
+
+    if input_source == VIDEO_INPUT_SOURCE:
+        video_path = resolve_video_path(
+            benchmark_config
+        )
+
+        return iter_video_frames(
+            video_path
+        )
+
+    if input_source == CAMERA_INPUT_SOURCE:
+        raw_camera_index = (
+            active_environment.get(
+                CAMERA_INDEX_VARIABLE
+            )
+        )
+
+        if (
+            not isinstance(raw_camera_index, str)
+            or not raw_camera_index.strip()
+        ):
+            raise ControlledIlluminationPurePythonRunnerError(
+                f"{CAMERA_INDEX_VARIABLE} must be "
+                "a non-negative integer."
+            )
+
+        try:
+            camera_index = int(
+                raw_camera_index
+            )
+        except ValueError as error:
+            raise ControlledIlluminationPurePythonRunnerError(
+                f"{CAMERA_INDEX_VARIABLE} must be "
+                "a non-negative integer."
+            ) from error
+
+        if camera_index < 0:
+            raise ControlledIlluminationPurePythonRunnerError(
+                f"{CAMERA_INDEX_VARIABLE} must be "
+                "a non-negative integer."
+            )
+
+        return iter_camera_frames(
+            camera_index
+        )
+
+    raise ControlledIlluminationPurePythonRunnerError(
+        "Unsupported input source: "
+        f"{input_source}"
     )
 
 
@@ -160,16 +253,15 @@ def execute_pure_python_run(
     frame_processor = create_frame_processor(
         algorithm_config
     )
-    video_path = resolve_video_path(
-        benchmark_config
+    frame_source = create_frame_source(
+        benchmark_config,
+        environment=environment,
     )
 
     started_at_utc = now_provider()
 
     frame_records = run_realtime_trial(
-        frame_source=iter_video_frames(
-            video_path
-        ),
+        frame_source=frame_source,
         processor=frame_processor,
         config=realtime_config,
         architecture=planned_run.architecture,

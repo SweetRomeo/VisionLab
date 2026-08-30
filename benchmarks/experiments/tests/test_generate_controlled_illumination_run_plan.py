@@ -109,6 +109,60 @@ class ControlledIlluminationRunPlanCliTests(
                 captured_output.getvalue(),
             )
 
+    def test_optical_screening_profile_dry_run_reports_300_runs(
+        self,
+    ) -> None:
+        config_path = (
+            Path(__file__).resolve().parents[1]
+            / "config"
+            / (
+                "controlled_illumination_"
+                "optical_screening.json"
+            )
+        )
+
+        with TemporaryDirectory() as temporary:
+            output_path = (
+                Path(temporary) / "output"
+            )
+
+            arguments = (
+                create_argument_parser().parse_args(
+                    [
+                        "--config",
+                        str(config_path),
+                        "--experiment-id",
+                        "optical-screening-cli-test",
+                        "--output-directory",
+                        str(output_path),
+                        "--dry-run",
+                    ]
+                )
+            )
+
+            captured_output = StringIO()
+
+            with redirect_stdout(captured_output):
+                exit_code = run_cli(arguments)
+
+            output = captured_output.getvalue()
+
+            self.assertEqual(
+                exit_code,
+                0,
+            )
+            self.assertFalse(
+                output_path.exists()
+            )
+            self.assertIn(
+                "Run count: 300",
+                output,
+            )
+            self.assertIn(
+                "no manifest files written",
+                output,
+            )
+
     def test_cli_writes_json_and_csv_manifests(
         self,
     ) -> None:

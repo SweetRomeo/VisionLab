@@ -20,7 +20,7 @@ DEFAULT_CONFIG_PATH = (
     / "controlled_illumination_config.json"
 )
 
-REQUIRED_PHASES = {
+SUPPORTED_PHASES = {
     "constant_lux",
     "constant_source",
 }
@@ -532,20 +532,18 @@ def validate_controlled_illumination_config(
             f"phases[{index}].name",
         )
 
+        if phase_name not in SUPPORTED_PHASES:
+            raise ControlledIlluminationConfigError(
+                "Unsupported experiment phase: "
+                f"{phase_name}"
+            )
+
         if phase_name in phase_names:
             raise ControlledIlluminationConfigError(
                 f"Duplicate experiment phase: {phase_name}"
             )
 
         phase_names.add(phase_name)
-
-    missing_phases = REQUIRED_PHASES - phase_names
-
-    if missing_phases:
-        raise ControlledIlluminationConfigError(
-            "Missing experiment phases: "
-            f"{sorted(missing_phases)}"
-        )
 
     validate_experiment_matrix(
         require_mapping(

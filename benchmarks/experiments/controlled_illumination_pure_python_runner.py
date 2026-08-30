@@ -7,7 +7,6 @@ import os
 import sys
 from typing import Any
 
-
 from benchmarks.experiments.controlled_illumination_run_artifacts import (
     write_completed_run_artifacts_atomic,
 )

@@ -2,9 +2,9 @@ import time
 import unittest
 from pathlib import Path
 from threading import Event
+from unittest.mock import Mock, patch
 
 import numpy as np
-from unittest.mock import Mock, patch
 
 from benchmarks.realtime import realtime_pipeline
 

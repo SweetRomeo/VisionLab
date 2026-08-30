@@ -488,7 +488,6 @@ class ControlledIlluminationPurePythonRunnerTests(
             patch(
                 f"{RUNNER_MODULE}."
                 "iter_camera_frames",
-                create=True,
                 return_value=frame_source,
             ) as iter_camera,
             patch(

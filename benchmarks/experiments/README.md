@@ -32,6 +32,7 @@ The infrastructure in this directory does not perform the physical experiment au
 | `finalize_controlled_illumination_run_bundle.py` | Provides the completed-run bundle finalization CLI. |
 | `tests/test_controlled_illumination_run_bundle.py` | Tests bundle models, artifact integrity, cross-file consistency and atomic finalization. |
 | `tests/test_finalize_controlled_illumination_run_bundle.py` | Tests finalization CLI selection and orchestration behavior. |
+| `config/controlled_illumination_optical_screening.json` | Defines the 300-run desktop optical-screening profile for the `constant_lux` phase. |
 
 ## Experiment phases
 
@@ -321,6 +322,78 @@ The planner:
 - Assigns sequential execution numbers and unique run identifiers.
 - Rejects duplicate experimental conditions.
 - Writes each JSON and CSV manifest using atomic file replacement.
+
+### Optical-screening profile
+
+The dedicated optical-screening configuration is:
+
+```text
+benchmarks/experiments/config/controlled_illumination_optical_screening.json
+```
+
+This profile implements the protocol's desktop optical-screening
+stage using only the `constant_lux` phase:
+
+```text
+1 platform
+× 1 architecture
+× 4 algorithms
+× 1 resolution
+× 5 illuminance levels
+× 3 incidence angles
+× 5 trials
+= 300 runs
+```
+
+The fixed profile dimensions are:
+
+- Platform: `desktop`
+- Architecture: `pure_python`
+- Resolution: `1280x720`
+- Algorithms: `original`, `gamma_correction`,
+  `histogram_equalization` and `clahe`
+- Target illuminance: `5`, `50`, `200`, `500` and `1000` lux
+- Incidence angles: `0`, `30` and `60` degrees
+- Trials per condition: `5`
+
+The profile does not require `source_output_settings` because it does
+not include the `constant_source` phase.
+
+Validate and summarize the profile without writing manifests:
+
+```bash
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--config \
+benchmarks/experiments/config/controlled_illumination_optical_screening.json \
+--experiment-id controlled-illumination-optical-screening \
+--dry-run
+```
+
+Successful validation reports:
+
+```text
+Run count: 300
+Dry run: no manifest files written.
+```
+
+Generate the optical-screening manifests by removing `--dry-run`:
+
+```bash
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--config \
+benchmarks/experiments/config/controlled_illumination_optical_screening.json \
+--experiment-id controlled-illumination-optical-screening
+```
+
+The generated manifests are written beneath:
+
+```text
+benchmarks/results/controlled_illumination/optical_screening/
+```
+
+Generated manifests and experiment results must not be committed.
 
 ### Constant-source configuration
 

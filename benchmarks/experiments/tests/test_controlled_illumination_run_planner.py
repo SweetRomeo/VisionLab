@@ -257,6 +257,40 @@ class ControlledIlluminationRunPlannerTests(
         ) as config_file:
             return json.load(config_file)
 
+    def load_optical_screening_config(
+        self,
+    ) -> dict:
+        config_path = (
+            Path(__file__).resolve().parents[1]
+            / "config"
+            / (
+                "controlled_illumination_"
+                "optical_screening.json"
+            )
+        )
+
+        with config_path.open(
+            "r",
+            encoding="utf-8",
+        ) as config_file:
+            return json.load(config_file)
+
+    def test_optical_screening_profile_expands_to_300_conditions(
+        self,
+    ) -> None:
+        config = (
+            self.load_optical_screening_config()
+        )
+
+        conditions = build_run_conditions(
+            config
+        )
+
+        self.assertEqual(
+            len(conditions),
+            300,
+        )
+
     def test_constant_source_requires_output_settings(
             self,
     ) -> None:
@@ -619,6 +653,181 @@ class ControlledIlluminationRunPlannerTests(
                 load_run_plan_manifest(
                     manifest_path
                 )
+
+    def test_optical_screening_profile_uses_canonical_dimensions(
+        self,
+    ) -> None:
+        config = (
+            self.load_optical_screening_config()
+        )
+
+        conditions = build_run_conditions(
+            config
+        )
+
+        self.assertEqual(
+            {condition.phase for condition in conditions},
+            {"constant_lux"},
+        )
+        self.assertEqual(
+            {condition.platform for condition in conditions},
+            {"desktop"},
+        )
+        self.assertEqual(
+            {
+                condition.architecture
+                for condition in conditions
+            },
+            {"pure_python"},
+        )
+        self.assertEqual(
+            {
+                condition.algorithm
+                for condition in conditions
+            },
+            {
+                "original",
+                "gamma_correction",
+                "histogram_equalization",
+                "clahe",
+            },
+        )
+        self.assertEqual(
+            {
+                (
+                    condition.resolution.width,
+                    condition.resolution.height,
+                )
+                for condition in conditions
+            },
+            {(1280, 720)},
+        )
+        self.assertEqual(
+            {
+                condition.target_illuminance_lux
+                for condition in conditions
+            },
+            {5.0, 50.0, 200.0, 500.0, 1000.0},
+        )
+        self.assertEqual(
+            {
+                condition.incidence_angle_degrees
+                for condition in conditions
+            },
+            {0.0, 30.0, 60.0},
+        )
+        self.assertEqual(
+            {
+                condition.trial_number
+                for condition in conditions
+            },
+            {1, 2, 3, 4, 5},
+        )
+        self.assertEqual(
+            {
+                condition.source_output_setting
+                for condition in conditions
+            },
+            {None},
+        )
+
+    def test_optical_screening_profile_covers_each_condition_once(
+        self,
+    ) -> None:
+        config = (
+            self.load_optical_screening_config()
+        )
+
+        conditions = build_run_conditions(
+            config
+        )
+
+        observed_conditions = {
+            (
+                condition.algorithm,
+                condition.target_illuminance_lux,
+                condition.incidence_angle_degrees,
+                condition.trial_number,
+            )
+            for condition in conditions
+        }
+
+        expected_conditions = {
+            (
+                algorithm,
+                illuminance_lux,
+                incidence_angle,
+                trial_number,
+            )
+            for algorithm in (
+                "original",
+                "gamma_correction",
+                "histogram_equalization",
+                "clahe",
+            )
+            for illuminance_lux in (
+                5.0,
+                50.0,
+                200.0,
+                500.0,
+                1000.0,
+            )
+            for incidence_angle in (
+                0.0,
+                30.0,
+                60.0,
+            )
+            for trial_number in range(1, 6)
+        }
+
+        self.assertEqual(
+            observed_conditions,
+            expected_conditions,
+        )
+        self.assertEqual(
+            len(observed_conditions),
+            len(conditions),
+        )
+
+    def test_optical_screening_profile_has_deterministic_order(
+        self,
+    ) -> None:
+        config = (
+            self.load_optical_screening_config()
+        )
+
+        first_plan = build_run_plan(
+            config,
+            experiment_id="optical-screening-test",
+            generated_at_utc=(
+                "2026-08-30T12:00:00Z"
+            ),
+        )
+        second_plan = build_run_plan(
+            config,
+            experiment_id="optical-screening-test",
+            generated_at_utc=(
+                "2026-08-30T12:00:00Z"
+            ),
+        )
+
+        self.assertTrue(
+            first_plan.randomized
+        )
+        self.assertEqual(
+            first_plan.randomization_seed,
+            20260821,
+        )
+        self.assertEqual(
+            [
+                planned_run.condition_key
+                for planned_run in first_plan.runs
+            ],
+            [
+                planned_run.condition_key
+                for planned_run in second_plan.runs
+            ],
+        )
 
 if __name__ == "__main__":
     unittest.main()

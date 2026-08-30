@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "experiment": {
+    "name": "controlled_illumination_optical_screening",
+    "protocol_path": "benchmarks/experiments/controlled_illumination_protocol.md",
+    "pilot_validation_required": true
+  },
+  "base_configs": {
+    "benchmark": "benchmarks/config/benchmark_config.json",
+    "realtime": "benchmarks/config/realtime_config.json"
+  },
+  "phases": [
+    {
+      "name": "constant_lux",
+      "description": "Keep target-plane illuminance approximately constant while changing the incidence angle.",
+      "controlled_variable": "target_illuminance_lux",
+      "source_output_policy": "adjust_to_target_lux"
+    }
+  ],
+  "experiment_matrix": {
+    "target_illuminance_levels_lux": [
+      5,
+      50,
+      200,
+      500,
+      1000
+    ],
+    "incidence_angles_degrees": [
+      0,
+      30,
+      60
+    ],
+    "algorithms": [
+      "original",
+      "gamma_correction",
+      "histogram_equalization",
+      "clahe"
+    ],
+    "architectures": [
+      "pure_python"
+    ],
+    "platforms": [
+      "desktop"
+    ],
+    "resolutions": [
+      {
+        "width": 1280,
+        "height": 720
+      }
+    ],
+    "trial_count": 5
+  },
+  "execution": {
+    "target_fps": 30.0,
+    "queue_capacity": 1,
+    "warmup_frames": 30,
+    "measured_frames": 500,
+    "drop_policy": "latest_frame",
+    "deadline_multiplier": 1.0,
+    "randomize_run_order": true,
+    "randomization_seed": 20260821
+  },
+  "illuminance_measurement": {
+    "unit": "lux",
+    "positions": [
+      "centre",
+      "top_left",
+      "top_right",
+      "bottom_left",
+      "bottom_right"
+    ],
+    "required_summary_values": [
+      "mean_lux",
+      "minimum_lux",
+      "maximum_lux"
+    ],
+    "required_device_fields": [
+      "lux_meter_model",
+      "lux_meter_range",
+      "lux_meter_resolution"
+    ]
+  },
+  "camera_modes": {
+    "controlled": {
+      "automatic_exposure_allowed": false,
+      "automatic_white_balance_allowed": false,
+      "required_settings": [
+        "exposure_time",
+        "sensor_gain_or_iso",
+        "white_balance",
+        "focus",
+        "frame_rate",
+        "resolution",
+        "lens",
+        "aperture"
+      ]
+    },
+    "operational": {
+      "automatic_exposure_allowed": true,
+      "automatic_white_balance_allowed": true,
+      "reported_values_required": true
+    }
+  },
+  "required_run_metadata": [
+    "experiment_id",
+    "run_id",
+    "collected_at_utc",
+    "git_commit_sha",
+    "phase",
+    "device_id",
+    "operating_system",
+    "platform",
+    "architecture",
+    "algorithm",
+    "algorithm_parameters",
+    "resolution",
+    "trial_number",
+    "target_fps",
+    "frame_deadline_ms",
+    "target_illuminance_lux",
+    "measured_illuminance",
+    "incidence_angle_degrees",
+    "source_output_setting",
+    "camera_mode",
+    "camera_settings",
+    "camera_to_target_distance_metres",
+    "light_to_target_distance_metres",
+    "input_scene_id",
+    "power_mode",
+    "clock_configuration",
+    "starting_temperature_celsius",
+    "ending_temperature_celsius",
+    "maximum_temperature_celsius",
+    "thermal_throttling_detected",
+    "software_versions"
+  ],
+  "output": {
+    "directory": "benchmarks/results/controlled_illumination/optical_screening",
+    "metadata_file_name": "run_metadata.json",
+    "generated_results_must_not_be_committed": true
+  }
+}

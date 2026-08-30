@@ -67,6 +67,55 @@ def iter_video_frames(
         capture.release()
 
 
+def iter_camera_frames(
+    camera_index: int,
+) -> Iterator[np.ndarray]:
+    if (
+        isinstance(camera_index, bool)
+        or not isinstance(camera_index, int)
+        or camera_index < 0
+    ):
+        raise ValueError(
+            "camera_index must be a "
+            "non-negative integer."
+        )
+
+    capture = cv2.VideoCapture(
+        camera_index
+    )
+
+    try:
+        if not capture.isOpened():
+            raise RuntimeError(
+                f"Camera {camera_index} "
+                "could not be opened."
+            )
+
+        while True:
+            frame_received, frame = (
+                capture.read()
+            )
+
+            if not frame_received:
+                raise RuntimeError(
+                    f"A frame could not be read "
+                    f"from camera {camera_index}."
+                )
+
+            if (
+                frame is None
+                or frame.size == 0
+            ):
+                raise RuntimeError(
+                    "An empty frame was read "
+                    f"from camera {camera_index}."
+                )
+
+            yield frame
+    finally:
+        capture.release()
+
+
 def validate_input_frame(
     frame: np.ndarray,
 ) -> None:

@@ -241,6 +241,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             "test": "benchmark-config",
         }
         realtime_config = SimpleNamespace(
+            target_fps=30.0,
             warmup_frames=30,
         )
         algorithm_config = {
@@ -335,6 +336,9 @@ class ControlledIlluminationPurePythonRunnerTests(
         )
         create_source.assert_called_once_with(
             benchmark_config,
+            width=640,
+            height=480,
+            fps=30.0,
             environment=environment,
         )
         run_trial.assert_called_once_with(
@@ -503,6 +507,9 @@ class ControlledIlluminationPurePythonRunnerTests(
                 pure_python_runner
                 .create_frame_source(
                     benchmark_config,
+                    width=640,
+                    height=480,
+                    fps=30.0,
                     environment={
                         "VISIONLAB_INPUT_SOURCE": (
                             "camera"
@@ -517,7 +524,10 @@ class ControlledIlluminationPurePythonRunnerTests(
             frame_source,
         )
         iter_camera.assert_called_once_with(
-            2
+            2,
+            width=640,
+            height=480,
+            fps=30.0,
         )
         resolve_video.assert_not_called()
         iter_video.assert_not_called()
@@ -578,6 +588,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             "VISIONLAB_CAMERA_INDEX": "0",
         }
         realtime_config = SimpleNamespace(
+            target_fps=30.0,
             warmup_frames=30,
         )
 

@@ -1,3 +1,4 @@
+import math
 from collections.abc import (
     Callable,
     Iterable,
@@ -24,6 +25,7 @@ from benchmarks.realtime.realtime_records import (
     create_processed_record,
 )
 
+CAMERA_FPS_ABS_TOLERANCE = 0.1
 
 FrameProcessor = Callable[
     [np.ndarray],
@@ -69,6 +71,14 @@ def iter_video_frames(
 
 def iter_camera_frames(
     camera_index: int,
+    *,
+    width: int | None = None,
+    height: int | None = None,
+    fps: float | None = None,
+    capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
 ) -> Iterator[np.ndarray]:
     if (
         isinstance(camera_index, bool)
@@ -78,6 +88,61 @@ def iter_camera_frames(
         raise ValueError(
             "camera_index must be a "
             "non-negative integer."
+        )
+
+    if (
+        width is not None
+        and (
+            isinstance(width, bool)
+            or not isinstance(width, int)
+            or width <= 0
+        )
+    ):
+        raise ValueError(
+            "width must be a positive integer."
+        )
+
+    if (
+        height is not None
+        and (
+            isinstance(height, bool)
+            or not isinstance(height, int)
+            or height <= 0
+        )
+    ):
+        raise ValueError(
+            "height must be a positive integer."
+        )
+
+    if (
+        fps is not None
+        and (
+            isinstance(fps, bool)
+            or not isinstance(
+                fps,
+                (int, float),
+            )
+            or not math.isfinite(
+                float(fps)
+            )
+            or fps <= 0
+        )
+    ):
+        raise ValueError(
+            "fps must be a positive finite number."
+        )
+
+    if (
+        capture_mode_reporter is not None
+        and (
+            width is None
+            or height is None
+            or fps is None
+        )
+    ):
+        raise ValueError(
+            "capture mode reporting requires "
+            "width, height, and fps."
         )
 
     capture = cv2.VideoCapture(
@@ -91,6 +156,143 @@ def iter_camera_frames(
                 "could not be opened."
             )
 
+        if width is not None:
+            width_configured = capture.set(
+                cv2.CAP_PROP_FRAME_WIDTH,
+                float(width),
+            )
+
+            if not width_configured:
+                raise RuntimeError(
+                    "Camera width could not be "
+                    "configured."
+                )
+
+            effective_width = capture.get(
+                cv2.CAP_PROP_FRAME_WIDTH
+            )
+
+            if (
+                isinstance(effective_width, bool)
+                or not isinstance(
+                    effective_width,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(effective_width)
+                )
+                or effective_width <= 0
+            ):
+                raise RuntimeError(
+                    "Camera width returned "
+                    "an invalid value."
+                )
+
+            if not math.isclose(
+                effective_width,
+                float(width),
+                rel_tol=0.0,
+                abs_tol=0.0,
+            ):
+                raise RuntimeError(
+                    "Camera width does not match "
+                    "the requested value."
+                )
+
+        if height is not None:
+            height_configured = capture.set(
+                cv2.CAP_PROP_FRAME_HEIGHT,
+                float(height),
+            )
+
+            if not height_configured:
+                raise RuntimeError(
+                    "Camera height could not be "
+                    "configured."
+                )
+
+            effective_height = capture.get(
+                cv2.CAP_PROP_FRAME_HEIGHT
+            )
+
+            if (
+                isinstance(effective_height, bool)
+                or not isinstance(
+                    effective_height,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(effective_height)
+                )
+                or effective_height <= 0
+            ):
+                raise RuntimeError(
+                    "Camera height returned "
+                    "an invalid value."
+                )
+
+            if not math.isclose(
+                    effective_height,
+                    float(height),
+                    rel_tol=0.0,
+                    abs_tol=0.0,
+            ):
+                raise RuntimeError(
+                    "Camera height does not match "
+                    "the requested value."
+                )
+
+        if fps is not None:
+            fps_configured = capture.set(
+                cv2.CAP_PROP_FPS,
+                float(fps),
+            )
+
+            if not fps_configured:
+                raise RuntimeError(
+                    "Camera FPS could not be "
+                    "configured."
+                )
+
+
+            effective_fps = capture.get(
+                cv2.CAP_PROP_FPS
+            )
+
+            if (
+                isinstance(effective_fps, bool)
+                or not isinstance(
+                    effective_fps,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(effective_fps)
+                )
+                or effective_fps <= 0
+            ):
+                raise RuntimeError(
+                    "Camera FPS returned "
+                    "an invalid value."
+                )
+
+            if not math.isclose(
+                effective_fps,
+                float(fps),
+                rel_tol=0.0,
+                abs_tol=CAMERA_FPS_ABS_TOLERANCE,
+            ):
+                raise RuntimeError(
+                    "Camera FPS does not match "
+                    "the requested value."
+                )
+
+        if capture_mode_reporter is not None:
+            capture_mode_reporter(
+                int(effective_width),
+                int(effective_height),
+                float(effective_fps),
+            )
+
         while True:
             frame_received, frame = (
                 capture.read()
@@ -98,7 +300,7 @@ def iter_camera_frames(
 
             if not frame_received:
                 raise RuntimeError(
-                    f"A frame could not be read "
+                    "A frame could not be read "
                     f"from camera {camera_index}."
                 )
 
@@ -109,6 +311,24 @@ def iter_camera_frames(
                 raise RuntimeError(
                     "An empty frame was read "
                     f"from camera {camera_index}."
+                )
+
+            actual_height = frame.shape[0]
+            actual_width = frame.shape[1]
+
+            if (
+                (
+                    width is not None
+                    and actual_width != width
+                )
+                or (
+                    height is not None
+                    and actual_height != height
+                )
+            ):
+                raise RuntimeError(
+                    "Camera frame dimensions do not "
+                    "match the requested capture mode."
                 )
 
             yield frame

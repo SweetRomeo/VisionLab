@@ -61,10 +61,12 @@ def current_utc_timestamp() -> str:
         .replace("+00:00", "Z")
     )
 
-
 def create_frame_source(
     benchmark_config: dict[str, Any],
     *,
+    width: int | None = None,
+    height: int | None = None,
+    fps: float | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> Any:
     active_environment = (
@@ -133,7 +135,10 @@ def create_frame_source(
             )
 
         return iter_camera_frames(
-            camera_index
+            camera_index,
+            width=width,
+            height=height,
+            fps=fps,
         )
 
     raise ControlledIlluminationPurePythonRunnerError(
@@ -254,6 +259,9 @@ def execute_pure_python_run(
     )
     frame_source = create_frame_source(
         benchmark_config,
+        width=planned_run.resolution.width,
+        height=planned_run.resolution.height,
+        fps=realtime_config.target_fps,
         environment=environment,
     )
 

@@ -824,6 +824,35 @@ controlled-illumination experiment until exposure, sensor gain or ISO,
 white balance, focus, frame rate, resolution and calibration have been
 configured and verified according to the experiment protocol.
 
+### Live-camera capture preflight
+
+Before starting a physical controlled-illumination run, validate that
+the camera can provide the requested resolution and frame rate:
+
+```bash
+python -m benchmarks.experiments.controlled_illumination_camera_preflight \
+  --camera-index 0 \
+  --width 1280 \
+  --height 720 \
+  --fps 30 \
+  --sample-frames 30
+```
+
+The preflight configures the requested capture mode, reads back the
+effective width, height, and frame rate, and samples the requested
+number of frames. Camera resources are released after successful and
+failed checks.
+
+The effective width and height must exactly match the requested values.
+The effective frame rate is accepted within an absolute tolerance of
+`0.1 FPS`, allowing common values such as `29.97 FPS` for a requested
+`30 FPS`.
+
+A successful preflight does not write experiment manifests, frame
+results, summaries, or other run artifacts. It validates capture
+geometry and frame availability only; exposure, gain, white balance,
+focus, illumination, and calibration must be verified separately.
+
 ### Run environment
 
 The orchestrator passes the selected condition to the architecture

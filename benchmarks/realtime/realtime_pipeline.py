@@ -1,3 +1,4 @@
+import math
 from collections.abc import (
     Callable,
     Iterable,
@@ -6,11 +7,9 @@ from collections.abc import (
 from pathlib import Path
 from threading import Event, Lock, Thread
 from time import perf_counter_ns
-from collections.abc import Callable, Iterator
 
 import cv2
 import numpy as np
-import math
 
 from benchmarks.realtime.latest_frame_queue import (
     LatestFrameQueue,
@@ -113,24 +112,6 @@ def iter_camera_frames(
     ):
         raise ValueError(
             "height must be a positive integer."
-        )
-
-    if (
-        fps is not None
-        and (
-            isinstance(fps, bool)
-            or not isinstance(
-                fps,
-                (int, float),
-            )
-            or not math.isfinite(
-                float(fps)
-            )
-            or fps <= 0
-        )
-    ):
-        raise ValueError(
-            "fps must be a positive finite number."
         )
 
     if (

@@ -6,6 +6,7 @@ import math
 import os
 import sys
 from typing import Any
+from pathlib import Path
 
 from benchmarks.experiments.controlled_illumination_run_artifacts import (
     write_completed_run_artifacts_atomic,
@@ -33,6 +34,15 @@ from benchmarks.realtime.realtime_pipeline import (
     iter_video_frames,
     run_realtime_trial,
 )
+from benchmarks.experiments.controlled_illumination_metadata import (
+    load_controlled_illumination_config,
+)
+
+from benchmarks.experiments.controlled_illumination_quality_capture import (
+    QualityCaptureBuffer,
+    load_quality_capture_config,
+    write_quality_capture_artifacts_atomic,
+)
 
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
@@ -46,7 +56,9 @@ CAMERA_INPUT_SOURCE = "camera"
 CAMERA_INDEX_VARIABLE = (
     "VISIONLAB_CAMERA_INDEX"
 )
-
+EXPERIMENT_CONFIG_VARIABLE = (
+    "VISIONLAB_EXPERIMENT_CONFIG"
+)
 
 class ControlledIlluminationPurePythonRunnerError(
     RuntimeError
@@ -59,6 +71,35 @@ def current_utc_timestamp() -> str:
         datetime.now(timezone.utc)
         .isoformat()
         .replace("+00:00", "Z")
+    )
+
+def load_experiment_config(
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    active_environment = (
+        os.environ
+        if environment is None
+        else environment
+    )
+
+    raw_config_path = active_environment.get(
+        EXPERIMENT_CONFIG_VARIABLE
+    )
+
+    if raw_config_path is None:
+        return load_controlled_illumination_config()
+
+    if (
+        not isinstance(raw_config_path, str)
+        or not raw_config_path.strip()
+    ):
+        raise ControlledIlluminationPurePythonRunnerError(
+            f"{EXPERIMENT_CONFIG_VARIABLE} must contain "
+            "a non-empty path."
+        )
+
+    return load_controlled_illumination_config(
+        Path(raw_config_path.strip())
     )
 
 def create_frame_source(
@@ -238,6 +279,23 @@ def execute_pure_python_run(
     benchmark_config = load_benchmark_config()
     realtime_config = load_realtime_config()
 
+    experiment_config = load_experiment_config(
+        environment
+    )
+
+    quality_capture_config = (
+        load_quality_capture_config(
+            experiment_config,
+            measured_frames=(
+                realtime_config.measured_frames
+            ),
+        )
+    )
+
+    quality_capture_buffer = QualityCaptureBuffer(
+        quality_capture_config
+    )
+
     validate_shared_execution_counts(
         benchmark_config,
         realtime_config,
@@ -276,9 +334,38 @@ def execute_pure_python_run(
         width=planned_run.resolution.width,
         height=planned_run.resolution.height,
         trial=planned_run.trial_number,
+        frame_capture_callback=(
+            quality_capture_buffer.capture
+            if quality_capture_config.enabled
+            else None
+        ),
     )
 
+    if (
+            quality_capture_config.enabled
+            and quality_capture_buffer.missing_indices
+    ):
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Configured quality samples were not "
+            "captured. Missing measured frame indices: "
+            f"{list(quality_capture_buffer.missing_indices)}"
+        )
+
     finished_at_utc = now_provider()
+
+    if quality_capture_config.enabled:
+        write_quality_capture_artifacts_atomic(
+            output_directory=(
+                context.output_directory
+            ),
+            experiment_id=context.experiment_id,
+            run_id=context.run_id,
+            algorithm=planned_run.algorithm,
+            width=planned_run.resolution.width,
+            height=planned_run.resolution.height,
+            config=quality_capture_config,
+            samples=quality_capture_buffer.samples,
+        )
 
     artifact_paths = (
         write_completed_run_artifacts_atomic(

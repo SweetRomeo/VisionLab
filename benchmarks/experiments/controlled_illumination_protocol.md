@@ -290,6 +290,8 @@ The architecture dimension does not need to be repeated for every optical-qualit
 
 One canonical implementation may be used for optical-quality screening, while representative lighting conditions are retained for architecture-performance measurements.
 
+The Pure Python implementation is the canonical architecture for the initial optical-quality screening stage. Deterministic quality-sample capture may be enabled for these runs according to Section 11.1.
+
 ### 10.2. Embedded-platform comparison
 
 After the screening stage, representative lighting profiles will be selected, including at least:
@@ -299,6 +301,8 @@ After the screening stage, representative lighting profiles will be selected, in
 * A bright or oblique-light condition.
 
 All architectures will be evaluated under these selected profiles on each supported platform.
+
+Quality capture must remain disabled during official architecture-performance comparisons unless its overhead is explicitly included in the experiment design.
 
 ## 11. Trial procedure
 
@@ -328,6 +332,83 @@ Trials per condition: 5
 Queue capacity: 1
 Drop policy: latest frame
 ```
+
+### 11.1. Optical-quality sample capture
+
+Optical-quality screening runs may capture deterministic input and processed-frame samples for later image-quality analysis.
+
+Quality capture is configured through the optional `quality_capture` section of the controlled-illumination experiment configuration:
+
+```json
+"quality_capture": {
+  "enabled": true,
+  "measured_frame_indices": [
+    0,
+    124,
+    249,
+    374,
+    499
+  ],
+  "image_format": "png"
+}
+```
+
+`measured_frame_indices` uses zero-based indexing over measured frames only. Warm-up frames are not included in this index space.
+
+For the current optical-screening configuration, five representative measured frames are captured from each run:
+
+```text
+0, 124, 249, 374, 499
+```
+
+This sampling policy must remain deterministic within an experiment so that every trial captures equivalent positions in measured-frame execution.
+
+When quality capture is enabled, each selected measured frame preserves both:
+
+* the input frame supplied to the processing algorithm,
+* the corresponding processed output frame.
+
+Samples are buffered in memory during execution and published after measured execution has completed.
+
+The run directory contains:
+
+```text
+<run-directory>/
+├── quality_samples/
+│   ├── frame_000000_input.png
+│   ├── frame_000000_processed.png
+│   ├── frame_000124_input.png
+│   ├── frame_000124_processed.png
+│   ├── ...
+│   ├── frame_000499_input.png
+│   └── frame_000499_processed.png
+└── quality_samples_manifest.json
+```
+
+PNG is used as a lossless storage format.
+
+The quality-sample manifest records:
+
+* experiment and run identifiers,
+* algorithm,
+* resolution,
+* capture configuration,
+* measured frame index,
+* input and processed image paths,
+* image dimensions,
+* image data type,
+* SHA-256 hashes for each image.
+
+PNG encoding, hashing and filesystem writes must not occur inside measured processing timing. Selected frames are copied through the post-processing capture hook and are encoded and written only after measured execution has completed.
+
+Quality capture therefore protects algorithm processing-time measurements from image encoding and filesystem I/O. However, buffering selected frames still introduces additional memory-copy activity during a run.
+
+For this reason, quality-capture runs must be treated separately from official architecture-performance comparisons. Quality capture must remain disabled during Pure Python, Hybrid Python+C++ and Pure C++ performance comparisons unless its additional overhead is explicitly measured and accounted for.
+
+If the `quality_capture` section is absent, quality capture remains disabled and existing runner behaviour is preserved.
+
+Quality artifacts must not overwrite an existing completed sample set. Publication uses temporary staging followed by atomic publication, with the manifest published as the completion marker. Failed capture or publication must not leave a completed quality-sample artifact set behind.
+
 
 ## 12. Randomization and independence
 

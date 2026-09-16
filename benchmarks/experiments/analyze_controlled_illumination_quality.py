@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import csv
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import cv2
 import numpy as np
@@ -18,6 +21,53 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
 DARK_CLIPPING_THRESHOLD = 0
 BRIGHT_CLIPPING_THRESHOLD = 255
 PIXEL_VALUE_RANGE = 255.0
+
+QUALITY_SAMPLE_CSV_FIELDS = (
+    "experiment_id",
+    "run_id",
+    "algorithm",
+    "resolution_width",
+    "resolution_height",
+    "measured_frame_index",
+    "input_path",
+    "processed_path",
+    "input_sha256",
+    "processed_sha256",
+    "input_mean_intensity",
+    "processed_mean_intensity",
+    "input_intensity_std",
+    "processed_intensity_std",
+    "input_rms_contrast",
+    "processed_rms_contrast",
+    "input_dark_clipping_pct",
+    "processed_dark_clipping_pct",
+    "input_bright_clipping_pct",
+    "processed_bright_clipping_pct",
+    "mae",
+    "max_absolute_error",
+    "mse",
+    "psnr",
+)
+
+QUALITY_TRIAL_SUMMARY_CSV_FIELDS = (
+    "experiment_id",
+    "run_id",
+    "algorithm",
+    "resolution_width",
+    "resolution_height",
+    "sample_count",
+    "mean_input_intensity",
+    "mean_processed_intensity",
+    "mean_input_rms_contrast",
+    "mean_processed_rms_contrast",
+    "mean_input_dark_clipping_pct",
+    "mean_processed_dark_clipping_pct",
+    "mean_input_bright_clipping_pct",
+    "mean_processed_bright_clipping_pct",
+    "mean_mae",
+    "mean_mse",
+    "mean_psnr",
+)
 
 
 class ControlledIlluminationQualityAnalysisError(
@@ -98,6 +148,31 @@ class QualitySampleAnalysis:
     max_absolute_error: float
     mse: float
     psnr: float
+
+@dataclass(frozen=True)
+class QualityTrialSummary:
+    experiment_id: str
+    run_id: str
+    algorithm: str
+    resolution_width: int
+    resolution_height: int
+    sample_count: int
+
+    mean_input_intensity: float
+    mean_processed_intensity: float
+
+    mean_input_rms_contrast: float
+    mean_processed_rms_contrast: float
+
+    mean_input_dark_clipping_pct: float
+    mean_processed_dark_clipping_pct: float
+
+    mean_input_bright_clipping_pct: float
+    mean_processed_bright_clipping_pct: float
+
+    mean_mae: float
+    mean_mse: float
+    mean_psnr: float
 
 def analyze_quality_run(
     run: ValidatedQualityRun,
@@ -188,6 +263,138 @@ def analyze_quality_run(
         )
 
     return tuple(analyses)
+
+def summarize_quality_trial(
+    analyses: tuple[
+        QualitySampleAnalysis,
+        ...,
+    ],
+) -> QualityTrialSummary:
+    if not analyses:
+        raise ControlledIlluminationQualityAnalysisError(
+            "Quality trial analysis must not be empty."
+        )
+
+    first = analyses[0]
+
+    for analysis in analyses[1:]:
+        if (
+            analysis.experiment_id
+            != first.experiment_id
+            or analysis.run_id
+            != first.run_id
+            or analysis.algorithm
+            != first.algorithm
+            or analysis.resolution_width
+            != first.resolution_width
+            or analysis.resolution_height
+            != first.resolution_height
+        ):
+            raise ControlledIlluminationQualityAnalysisError(
+                "All quality samples in a trial summary "
+                "must belong to the same run."
+            )
+
+    return QualityTrialSummary(
+        experiment_id=first.experiment_id,
+        run_id=first.run_id,
+        algorithm=first.algorithm,
+        resolution_width=(
+            first.resolution_width
+        ),
+        resolution_height=(
+            first.resolution_height
+        ),
+        sample_count=len(analyses),
+        mean_input_intensity=float(
+            np.mean(
+                [
+                    analysis.input_mean_intensity
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_processed_intensity=float(
+            np.mean(
+                [
+                    analysis.processed_mean_intensity
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_input_rms_contrast=float(
+            np.mean(
+                [
+                    analysis.input_rms_contrast
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_processed_rms_contrast=float(
+            np.mean(
+                [
+                    analysis.processed_rms_contrast
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_input_dark_clipping_pct=float(
+            np.mean(
+                [
+                    analysis.input_dark_clipping_pct
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_processed_dark_clipping_pct=float(
+            np.mean(
+                [
+                    analysis.processed_dark_clipping_pct
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_input_bright_clipping_pct=float(
+            np.mean(
+                [
+                    analysis.input_bright_clipping_pct
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_processed_bright_clipping_pct=float(
+            np.mean(
+                [
+                    analysis.processed_bright_clipping_pct
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_mae=float(
+            np.mean(
+                [
+                    analysis.mae
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_mse=float(
+            np.mean(
+                [
+                    analysis.mse
+                    for analysis in analyses
+                ]
+            )
+        ),
+        mean_psnr=float(
+            np.mean(
+                [
+                    analysis.psnr
+                    for analysis in analyses
+                ]
+            )
+        ),
+    )
 
 def convert_to_grayscale(
     image: np.ndarray,
@@ -875,3 +1082,281 @@ def load_and_validate_quality_capture_run(
             )
         ),
     )
+
+def write_quality_sample_analysis_csv(
+    output_path: Path,
+    analyses: tuple[
+        QualitySampleAnalysis,
+        ...,
+    ],
+) -> Path:
+    if not analyses:
+        raise ControlledIlluminationQualityAnalysisError(
+            "Quality-sample analysis must not be empty."
+        )
+
+    identities: set[
+        tuple[str, str, int]
+    ] = set()
+
+    for analysis in analyses:
+        identity = (
+            analysis.experiment_id,
+            analysis.run_id,
+            analysis.measured_frame_index,
+        )
+
+        if identity in identities:
+            raise ControlledIlluminationQualityAnalysisError(
+                "Duplicate quality-sample analysis "
+                f"identity: {identity}"
+            )
+
+        identities.add(identity)
+
+    output_path = Path(
+        output_path
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = (
+        output_path.parent
+        / (
+            f".{output_path.name}."
+            f"{uuid4().hex}.tmp"
+        )
+    )
+
+    try:
+        with temporary_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as output_file:
+            writer = csv.DictWriter(
+                output_file,
+                fieldnames=QUALITY_SAMPLE_CSV_FIELDS,
+            )
+
+            writer.writeheader()
+
+            for analysis in analyses:
+                writer.writerow(
+                    {
+                        "experiment_id": analysis.experiment_id,
+                        "run_id": analysis.run_id,
+                        "algorithm": analysis.algorithm,
+                        "resolution_width": (
+                            analysis.resolution_width
+                        ),
+                        "resolution_height": (
+                            analysis.resolution_height
+                        ),
+                        "measured_frame_index": (
+                            analysis.measured_frame_index
+                        ),
+                        "input_path": analysis.input_path,
+                        "processed_path": (
+                            analysis.processed_path
+                        ),
+                        "input_sha256": (
+                            analysis.input_sha256
+                        ),
+                        "processed_sha256": (
+                            analysis.processed_sha256
+                        ),
+                        "input_mean_intensity": (
+                            analysis.input_mean_intensity
+                        ),
+                        "processed_mean_intensity": (
+                            analysis.processed_mean_intensity
+                        ),
+                        "input_intensity_std": (
+                            analysis.input_intensity_std
+                        ),
+                        "processed_intensity_std": (
+                            analysis.processed_intensity_std
+                        ),
+                        "input_rms_contrast": (
+                            analysis.input_rms_contrast
+                        ),
+                        "processed_rms_contrast": (
+                            analysis.processed_rms_contrast
+                        ),
+                        "input_dark_clipping_pct": (
+                            analysis.input_dark_clipping_pct
+                        ),
+                        "processed_dark_clipping_pct": (
+                            analysis.processed_dark_clipping_pct
+                        ),
+                        "input_bright_clipping_pct": (
+                            analysis.input_bright_clipping_pct
+                        ),
+                        "processed_bright_clipping_pct": (
+                            analysis.processed_bright_clipping_pct
+                        ),
+                        "mae": analysis.mae,
+                        "max_absolute_error": (
+                            analysis.max_absolute_error
+                        ),
+                        "mse": analysis.mse,
+                        "psnr": analysis.psnr,
+                    }
+                )
+
+            output_file.flush()
+            os.fsync(
+                output_file.fileno()
+            )
+
+        os.replace(
+            temporary_path,
+            output_path,
+        )
+
+    finally:
+        temporary_path.unlink(
+            missing_ok=True
+        )
+
+    return output_path
+
+def write_quality_trial_summary_csv(
+    output_path: Path,
+    summaries: tuple[
+        QualityTrialSummary,
+        ...,
+    ],
+) -> Path:
+    if not summaries:
+        raise ControlledIlluminationQualityAnalysisError(
+            "Quality trial summaries must not be empty."
+        )
+
+    identities: set[
+        tuple[str, str]
+    ] = set()
+
+    for summary in summaries:
+        identity = (
+            summary.experiment_id,
+            summary.run_id,
+        )
+
+        if identity in identities:
+            raise ControlledIlluminationQualityAnalysisError(
+                "Duplicate quality trial summary "
+                f"identity: {identity}"
+            )
+
+        identities.add(identity)
+
+    output_path = Path(
+        output_path
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    temporary_path = (
+        output_path.parent
+        / (
+            f".{output_path.name}."
+            f"{uuid4().hex}.tmp"
+        )
+    )
+
+    try:
+        with temporary_path.open(
+            "w",
+            newline="",
+            encoding="utf-8",
+        ) as output_file:
+            writer = csv.DictWriter(
+                output_file,
+                fieldnames=(
+                    QUALITY_TRIAL_SUMMARY_CSV_FIELDS
+                ),
+            )
+
+            writer.writeheader()
+
+            for summary in summaries:
+                writer.writerow(
+                    {
+                        "experiment_id": (
+                            summary.experiment_id
+                        ),
+                        "run_id": (
+                            summary.run_id
+                        ),
+                        "algorithm": (
+                            summary.algorithm
+                        ),
+                        "resolution_width": (
+                            summary.resolution_width
+                        ),
+                        "resolution_height": (
+                            summary.resolution_height
+                        ),
+                        "sample_count": (
+                            summary.sample_count
+                        ),
+                        "mean_input_intensity": (
+                            summary.mean_input_intensity
+                        ),
+                        "mean_processed_intensity": (
+                            summary.mean_processed_intensity
+                        ),
+                        "mean_input_rms_contrast": (
+                            summary.mean_input_rms_contrast
+                        ),
+                        "mean_processed_rms_contrast": (
+                            summary.mean_processed_rms_contrast
+                        ),
+                        "mean_input_dark_clipping_pct": (
+                            summary.mean_input_dark_clipping_pct
+                        ),
+                        "mean_processed_dark_clipping_pct": (
+                            summary.mean_processed_dark_clipping_pct
+                        ),
+                        "mean_input_bright_clipping_pct": (
+                            summary.mean_input_bright_clipping_pct
+                        ),
+                        "mean_processed_bright_clipping_pct": (
+                            summary.mean_processed_bright_clipping_pct
+                        ),
+                        "mean_mae": (
+                            summary.mean_mae
+                        ),
+                        "mean_mse": (
+                            summary.mean_mse
+                        ),
+                        "mean_psnr": (
+                            summary.mean_psnr
+                        ),
+                    }
+                )
+
+            output_file.flush()
+            os.fsync(
+                output_file.fileno()
+            )
+
+        os.replace(
+            temporary_path,
+            output_path,
+        )
+
+    finally:
+        temporary_path.unlink(
+            missing_ok=True
+        )
+
+    return output_path

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import unittest
-
+import csv
 import numpy as np
 import json
 from pathlib import Path
@@ -10,6 +10,10 @@ from tempfile import TemporaryDirectory
 
 from benchmarks.experiments.analyze_controlled_illumination_quality import (
     ControlledIlluminationQualityAnalysisError,
+    QUALITY_SAMPLE_CSV_FIELDS,
+    QUALITY_TRIAL_SUMMARY_CSV_FIELDS,
+    QualitySampleAnalysis,
+    QualityTrialSummary,
     ValidatedQualityRun,
     ValidatedQualitySample,
     analyze_quality_run,
@@ -17,6 +21,9 @@ from benchmarks.experiments.analyze_controlled_illumination_quality import (
     calculate_image_quality_metrics,
     convert_to_grayscale,
     load_and_validate_quality_capture_run,
+    summarize_quality_trial,
+    write_quality_sample_analysis_csv,
+    write_quality_trial_summary_csv,
 )
 
 from benchmarks.experiments.controlled_illumination_quality_capture import (
@@ -804,6 +811,289 @@ class QualityRunAnalysisTests(
             analyses,
             (),
         )
+
+class QualityTrialSummaryTests(
+    unittest.TestCase
+):
+    @staticmethod
+    def create_analysis(
+        *,
+        frame_index: int,
+        input_intensity: float,
+        processed_intensity: float,
+        mae: float,
+        mse: float,
+        psnr: float,
+        run_id: str = "run-test",
+    ) -> QualitySampleAnalysis:
+        return QualitySampleAnalysis(
+            experiment_id="experiment-test",
+            run_id=run_id,
+            algorithm="clahe",
+            resolution_width=640,
+            resolution_height=480,
+            measured_frame_index=frame_index,
+            input_path=f"input_{frame_index}.png",
+            processed_path=f"processed_{frame_index}.png",
+            input_sha256="a" * 64,
+            processed_sha256="b" * 64,
+            input_mean_intensity=input_intensity,
+            processed_mean_intensity=processed_intensity,
+            input_intensity_std=10.0,
+            processed_intensity_std=20.0,
+            input_rms_contrast=0.10,
+            processed_rms_contrast=0.20,
+            input_dark_clipping_pct=1.0,
+            processed_dark_clipping_pct=2.0,
+            input_bright_clipping_pct=3.0,
+            processed_bright_clipping_pct=4.0,
+            mae=mae,
+            max_absolute_error=25.0,
+            mse=mse,
+            psnr=psnr,
+        )
+
+    def test_trial_summary_averages_samples(
+        self,
+    ) -> None:
+        analyses = (
+            self.create_analysis(
+                frame_index=0,
+                input_intensity=10.0,
+                processed_intensity=20.0,
+                mae=5.0,
+                mse=25.0,
+                psnr=30.0,
+            ),
+            self.create_analysis(
+                frame_index=124,
+                input_intensity=30.0,
+                processed_intensity=40.0,
+                mae=15.0,
+                mse=125.0,
+                psnr=20.0,
+            ),
+        )
+
+        summary = summarize_quality_trial(
+            analyses
+        )
+
+        self.assertEqual(
+            summary.experiment_id,
+            "experiment-test",
+        )
+        self.assertEqual(
+            summary.run_id,
+            "run-test",
+        )
+        self.assertEqual(
+            summary.sample_count,
+            2,
+        )
+
+        self.assertEqual(
+            summary.mean_input_intensity,
+            20.0,
+        )
+        self.assertEqual(
+            summary.mean_processed_intensity,
+            30.0,
+        )
+        self.assertEqual(
+            summary.mean_mae,
+            10.0,
+        )
+        self.assertEqual(
+            summary.mean_mse,
+            75.0,
+        )
+        self.assertEqual(
+            summary.mean_psnr,
+            25.0,
+        )
+
+    def test_empty_trial_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ControlledIlluminationQualityAnalysisError,
+            "must not be empty",
+        ):
+            summarize_quality_trial(
+                ()
+            )
+
+    def test_samples_from_different_runs_are_rejected(
+        self,
+    ) -> None:
+        analyses = (
+            self.create_analysis(
+                frame_index=0,
+                input_intensity=10.0,
+                processed_intensity=20.0,
+                mae=5.0,
+                mse=25.0,
+                psnr=30.0,
+                run_id="run-a",
+            ),
+            self.create_analysis(
+                frame_index=124,
+                input_intensity=30.0,
+                processed_intensity=40.0,
+                mae=15.0,
+                mse=125.0,
+                psnr=20.0,
+                run_id="run-b",
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            ControlledIlluminationQualityAnalysisError,
+            "same run",
+        ):
+            summarize_quality_trial(
+                analyses
+            )
+
+class QualityTrialSummaryCsvTests(
+    unittest.TestCase
+):
+    @staticmethod
+    def create_summary(
+        *,
+        run_id: str = "run-test",
+    ) -> QualityTrialSummary:
+        return QualityTrialSummary(
+            experiment_id="experiment-test",
+            run_id=run_id,
+            algorithm="clahe",
+            resolution_width=640,
+            resolution_height=480,
+            sample_count=5,
+            mean_input_intensity=80.0,
+            mean_processed_intensity=110.0,
+            mean_input_rms_contrast=0.15,
+            mean_processed_rms_contrast=0.22,
+            mean_input_dark_clipping_pct=2.0,
+            mean_processed_dark_clipping_pct=1.0,
+            mean_input_bright_clipping_pct=1.0,
+            mean_processed_bright_clipping_pct=3.0,
+            mean_mae=20.0,
+            mean_mse=500.0,
+            mean_psnr=25.0,
+        )
+
+    def test_trial_summary_csv_is_written(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            output_path = (
+                Path(temporary)
+                / "optical_quality_trial_summary.csv"
+            )
+
+            write_quality_trial_summary_csv(
+                output_path,
+                (
+                    self.create_summary(),
+                ),
+            )
+
+            self.assertTrue(
+                output_path.is_file()
+            )
+
+            with output_path.open(
+                "r",
+                newline="",
+                encoding="utf-8",
+            ) as input_file:
+                rows = list(
+                    csv.DictReader(
+                        input_file
+                    )
+                )
+
+            self.assertEqual(
+                len(rows),
+                1,
+            )
+
+            self.assertEqual(
+                rows[0]["run_id"],
+                "run-test",
+            )
+            self.assertEqual(
+                rows[0]["sample_count"],
+                "5",
+            )
+
+    def test_trial_summary_csv_fields(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            output_path = (
+                Path(temporary)
+                / "summary.csv"
+            )
+
+            write_quality_trial_summary_csv(
+                output_path,
+                (
+                    self.create_summary(),
+                ),
+            )
+
+            with output_path.open(
+                "r",
+                newline="",
+                encoding="utf-8",
+            ) as input_file:
+                reader = csv.DictReader(
+                    input_file
+                )
+
+                self.assertEqual(
+                    tuple(
+                        reader.fieldnames
+                        or ()
+                    ),
+                    QUALITY_TRIAL_SUMMARY_CSV_FIELDS,
+                )
+
+    def test_empty_trial_summary_csv_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                ControlledIlluminationQualityAnalysisError,
+                "must not be empty",
+            ):
+                write_quality_trial_summary_csv(
+                    Path(temporary)
+                    / "summary.csv",
+                    (),
+                )
+
+    def test_duplicate_trial_summary_is_rejected(
+        self,
+    ) -> None:
+        summary = self.create_summary()
+
+        with TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(
+                ControlledIlluminationQualityAnalysisError,
+                "Duplicate",
+            ):
+                write_quality_trial_summary_csv(
+                    Path(temporary)
+                    / "summary.csv",
+                    (
+                        summary,
+                        summary,
+                    ),
+                )
 
 if __name__ == "__main__":
     unittest.main()

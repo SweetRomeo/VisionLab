@@ -22,6 +22,14 @@ DARK_CLIPPING_THRESHOLD = 0
 BRIGHT_CLIPPING_THRESHOLD = 255
 PIXEL_VALUE_RANGE = 255.0
 
+OPTICAL_QUALITY_SAMPLES_FILE_NAME = (
+    "optical_quality_samples.csv"
+)
+
+OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME = (
+    "optical_quality_trial_summary.csv"
+)
+
 QUALITY_SAMPLE_CSV_FIELDS = (
     "experiment_id",
     "run_id",
@@ -68,6 +76,8 @@ QUALITY_TRIAL_SUMMARY_CSV_FIELDS = (
     "mean_mse",
     "mean_psnr",
 )
+
+
 
 
 class ControlledIlluminationQualityAnalysisError(
@@ -1263,6 +1273,128 @@ def write_quality_sample_analysis_csv(
         )
 
     return output_path
+
+def analyze_quality_capture_results(
+    results_directory: Path,
+    output_directory: Path,
+) -> tuple[Path, Path]:
+    run_directories = (
+        discover_quality_capture_runs(
+            results_directory
+        )
+    )
+
+    if not run_directories:
+        raise ControlledIlluminationQualityAnalysisError(
+            "No completed quality-capture runs "
+            "were found."
+        )
+
+    all_analyses: list[
+        QualitySampleAnalysis
+    ] = []
+
+    trial_summaries: list[
+        QualityTrialSummary
+    ] = []
+
+    discovered_run_identities: set[
+        tuple[str, str]
+    ] = set()
+
+    for run_directory in run_directories:
+        run = (
+            load_and_validate_quality_capture_run(
+                run_directory
+            )
+        )
+
+        run_identity = (
+            run.experiment_id,
+            run.run_id,
+        )
+
+        if (
+            run_identity
+            in discovered_run_identities
+        ):
+            raise ControlledIlluminationQualityAnalysisError(
+                "Duplicate quality-capture run "
+                f"identity: {run_identity}"
+            )
+
+        discovered_run_identities.add(
+            run_identity
+        )
+
+        analyses = analyze_quality_run(
+            run
+        )
+
+        if not analyses:
+            raise ControlledIlluminationQualityAnalysisError(
+                "Validated quality-capture run "
+                "contains no analyzable samples: "
+                f"{run_directory}"
+            )
+
+        summary = summarize_quality_trial(
+            analyses
+        )
+
+        all_analyses.extend(
+            analyses
+        )
+
+        trial_summaries.append(
+            summary
+        )
+
+    output_directory = Path(
+        output_directory
+    )
+
+    sample_output_path = (
+        output_directory
+        / OPTICAL_QUALITY_SAMPLES_FILE_NAME
+    )
+
+    summary_output_path = (
+        output_directory
+        / OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME
+    )
+
+    sample_written = False
+
+    try:
+        write_quality_sample_analysis_csv(
+            sample_output_path,
+            tuple(all_analyses),
+        )
+
+        sample_written = True
+
+        write_quality_trial_summary_csv(
+            summary_output_path,
+            tuple(trial_summaries),
+        )
+
+    except Exception:
+        if sample_written:
+            sample_output_path.unlink(
+                missing_ok=True
+            )
+
+        summary_output_path.unlink(
+            missing_ok=True
+        )
+
+        raise
+
+    return (
+        sample_output_path,
+        summary_output_path,
+    )
 
 def write_quality_trial_summary_csv(
     output_path: Path,

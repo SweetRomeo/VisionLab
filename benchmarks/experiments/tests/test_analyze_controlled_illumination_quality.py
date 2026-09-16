@@ -7,6 +7,7 @@ import numpy as np
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from benchmarks.experiments.analyze_controlled_illumination_quality import (
     ControlledIlluminationQualityAnalysisError,
@@ -25,6 +26,9 @@ from benchmarks.experiments.analyze_controlled_illumination_quality import (
     summarize_quality_trial,
     write_quality_sample_analysis_csv,
     write_quality_trial_summary_csv,
+    OPTICAL_QUALITY_SAMPLES_FILE_NAME,
+    OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME,
+    analyze_quality_capture_results,
 )
 
 from benchmarks.experiments.controlled_illumination_quality_capture import (
@@ -1293,6 +1297,284 @@ class QualityCaptureRunDiscoveryTests(
                 discover_quality_capture_runs(
                     file_path
                 )
+
+class QualityCaptureResultsAnalysisTests(
+    unittest.TestCase
+):
+    @staticmethod
+    def create_frame(
+        value: int,
+    ) -> np.ndarray:
+        return np.full(
+            (4, 6, 3),
+            value,
+            dtype=np.uint8,
+        )
+
+    def create_run(
+        self,
+        run_directory: Path,
+        *,
+        experiment_id: str,
+        run_id: str,
+        input_value: int,
+        processed_value: int,
+    ) -> None:
+        config = QualityCaptureConfig(
+            enabled=True,
+            measured_frame_indices=(0,),
+            image_format="png",
+        )
+
+        samples = (
+            CapturedQualitySample(
+                measured_frame_index=0,
+                input_frame=self.create_frame(
+                    input_value
+                ),
+                processed_frame=self.create_frame(
+                    processed_value
+                ),
+            ),
+        )
+
+        write_quality_capture_artifacts_atomic(
+            output_directory=run_directory,
+            experiment_id=experiment_id,
+            run_id=run_id,
+            algorithm="clahe",
+            width=6,
+            height=4,
+            config=config,
+            samples=samples,
+        )
+
+    def test_results_are_analyzed_end_to_end(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(
+                temporary
+            )
+
+            results_directory = (
+                root
+                / "results"
+            )
+
+            output_directory = (
+                root
+                / "analysis"
+            )
+
+            self.create_run(
+                results_directory
+                / "run-a",
+                experiment_id="experiment-test",
+                run_id="run-a",
+                input_value=10,
+                processed_value=20,
+            )
+
+            self.create_run(
+                results_directory
+                / "run-b",
+                experiment_id="experiment-test",
+                run_id="run-b",
+                input_value=30,
+                processed_value=40,
+            )
+
+            (
+                sample_path,
+                summary_path,
+            ) = analyze_quality_capture_results(
+                results_directory,
+                output_directory,
+            )
+
+            self.assertEqual(
+                sample_path.name,
+                OPTICAL_QUALITY_SAMPLES_FILE_NAME,
+            )
+
+            self.assertEqual(
+                summary_path.name,
+                OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME,
+            )
+
+            self.assertTrue(
+                sample_path.is_file()
+            )
+
+            self.assertTrue(
+                summary_path.is_file()
+            )
+
+            with sample_path.open(
+                "r",
+                newline="",
+                encoding="utf-8",
+            ) as input_file:
+                sample_rows = list(
+                    csv.DictReader(
+                        input_file
+                    )
+                )
+
+            with summary_path.open(
+                "r",
+                newline="",
+                encoding="utf-8",
+            ) as input_file:
+                summary_rows = list(
+                    csv.DictReader(
+                        input_file
+                    )
+                )
+
+            self.assertEqual(
+                len(sample_rows),
+                2,
+            )
+
+            self.assertEqual(
+                len(summary_rows),
+                2,
+            )
+
+            self.assertEqual(
+                [
+                    row["run_id"]
+                    for row in sample_rows
+                ],
+                [
+                    "run-a",
+                    "run-b",
+                ],
+            )
+
+    def test_empty_results_are_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(
+                temporary
+            )
+
+            results_directory = (
+                root
+                / "results"
+            )
+
+            results_directory.mkdir()
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationQualityAnalysisError,
+                "No completed quality-capture runs",
+            ):
+                analyze_quality_capture_results(
+                    results_directory,
+                    root / "analysis",
+                )
+
+    def test_duplicate_run_identity_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(
+                temporary
+            )
+
+            results_directory = (
+                root
+                / "results"
+            )
+
+            self.create_run(
+                results_directory
+                / "physical-run-a",
+                experiment_id="experiment-test",
+                run_id="duplicate-run",
+                input_value=10,
+                processed_value=20,
+            )
+
+            self.create_run(
+                results_directory
+                / "physical-run-b",
+                experiment_id="experiment-test",
+                run_id="duplicate-run",
+                input_value=30,
+                processed_value=40,
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationQualityAnalysisError,
+                "Duplicate quality-capture run",
+            ):
+                analyze_quality_capture_results(
+                    results_directory,
+                    root / "analysis",
+                )
+
+    def test_partial_outputs_are_cleaned_after_failure(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(
+                temporary
+            )
+
+            results_directory = (
+                    root
+                    / "results"
+            )
+
+            output_directory = (
+                    root
+                    / "analysis"
+            )
+
+            self.create_run(
+                results_directory
+                / "run-a",
+                experiment_id="experiment-test",
+                run_id="run-a",
+                input_value=10,
+                processed_value=20,
+            )
+
+            with patch(
+                    "benchmarks.experiments."
+                    "analyze_controlled_illumination_quality."
+                    "write_quality_trial_summary_csv",
+                    side_effect=RuntimeError(
+                        "summary write failure"
+                    ),
+            ):
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "summary write failure",
+                ):
+                    analyze_quality_capture_results(
+                        results_directory,
+                        output_directory,
+                    )
+
+            self.assertFalse(
+                (
+                        output_directory
+                        / OPTICAL_QUALITY_SAMPLES_FILE_NAME
+                ).exists()
+            )
+
+            self.assertFalse(
+                (
+                        output_directory
+                        / OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME
+                ).exists()
+            )
 
 if __name__ == "__main__":
     unittest.main()

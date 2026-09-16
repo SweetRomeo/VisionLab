@@ -32,6 +32,10 @@ FrameProcessor = Callable[
     np.ndarray,
 ]
 
+FrameCaptureCallback = Callable[
+    [int, np.ndarray, np.ndarray],
+    None,
+]
 
 def iter_video_frames(
     video_path: Path,
@@ -419,10 +423,22 @@ def run_realtime_trial(
     width: int,
     height: int,
     trial: int,
+    frame_capture_callback: (
+        FrameCaptureCallback | None
+    ) = None,
 ) -> list[RealtimeFrameRecord]:
     if not callable(processor):
         raise TypeError(
             "processor must be callable."
+        )
+
+    if (
+            frame_capture_callback is not None
+            and not callable(frame_capture_callback)
+    ):
+        raise TypeError(
+            "frame_capture_callback must be "
+            "callable or None."
         )
 
     for field_name, value in (
@@ -668,6 +684,13 @@ def run_realtime_trial(
                             ),
                         )
                     )
+
+                    if frame_capture_callback is not None:
+                        frame_capture_callback(
+                            result_frame_index - 1,
+                            scheduled_frame.payload,
+                            processed_frame,
+                        )
         except Exception as error:
             register_error(error)
 

@@ -60,6 +60,17 @@
     "randomize_run_order": true,
     "randomization_seed": 20260821
   },
+  "quality_capture": {
+    "enabled": true,
+    "measured_frame_indices": [
+      0,
+      124,
+      249,
+      374,
+      499
+    ],
+    "image_format": "png"
+  },
   "illuminance_measurement": {
     "unit": "lux",
     "positions": [

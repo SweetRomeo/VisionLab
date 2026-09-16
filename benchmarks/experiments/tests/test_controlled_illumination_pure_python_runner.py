@@ -6,7 +6,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock,patch
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -23,6 +23,9 @@ from benchmarks.experiments.controlled_illumination_run_planner import (
 )
 from benchmarks.experiments.controlled_illumination_runner_context import (
     ControlledIlluminationRunnerContext,
+)
+from benchmarks.experiments.controlled_illumination_quality_capture import (
+    QualityCaptureConfig,
 )
 
 from benchmarks.experiments import (
@@ -81,6 +84,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             deadline_ms=1000.0 / 30.0,
             trial_count=5,
             warmup_frames=30,
+            measured_frames=500,
         )
 
     def test_algorithm_configuration_is_selected(
@@ -243,6 +247,7 @@ class ControlledIlluminationPurePythonRunnerTests(
         realtime_config = SimpleNamespace(
             target_fps=30.0,
             warmup_frames=30,
+            measured_frames=500,
         )
         algorithm_config = {
             "name": "gamma_correction",
@@ -318,6 +323,10 @@ class ControlledIlluminationPurePythonRunnerTests(
                 "write_completed_run_artifacts_atomic",
                 return_value=expected_paths,
             ) as write_artifacts,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+            ) as write_quality_artifacts,
         ):
             actual_paths = execute_pure_python_run(
                 environment,
@@ -350,6 +359,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             trial=1,
+            frame_capture_callback=None,
         )
         write_artifacts.assert_called_once_with(
             self.context,
@@ -358,6 +368,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             finished_at_utc=FINISHED_AT,
             warmup_frame_count=30,
         )
+        write_quality_artifacts.assert_not_called()
 
     def test_cli_returns_failure_exit_code(
         self,
@@ -590,6 +601,7 @@ class ControlledIlluminationPurePythonRunnerTests(
         realtime_config = SimpleNamespace(
             target_fps=30.0,
             warmup_frames=30,
+            measured_frames=500,
         )
 
         with (
@@ -653,6 +665,413 @@ class ControlledIlluminationPurePythonRunnerTests(
                 )
 
         write_artifacts.assert_not_called()
+
+    def test_enabled_quality_capture_is_passed_to_realtime_trial(
+            self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=30,
+            measured_frames=500,
+        )
+
+        quality_config = QualityCaptureConfig(
+            enabled=True,
+            measured_frame_indices=(
+                0,
+                124,
+                249,
+                374,
+                499,
+            ),
+            image_format="png",
+        )
+
+        quality_samples = (
+            object(),
+            object(),
+        )
+
+        quality_buffer = SimpleNamespace(
+            capture=Mock(),
+            missing_indices=(),
+            samples=quality_samples,
+        )
+
+        processor = object()
+        frame_source = object()
+        records = (object(),)
+
+        expected_paths = (
+            Path("realtime_frame_results.csv"),
+            Path("execution_summary.json"),
+        )
+
+        timestamps = iter(
+            [
+                STARTED_AT,
+                FINISHED_AT,
+            ]
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value=benchmark_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_experiment_config",
+                return_value={
+                    "quality_capture": {}
+                },
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_quality_capture_config",
+                return_value=quality_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "QualityCaptureBuffer",
+                return_value=quality_buffer,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value={
+                    "name": "gamma_correction",
+                    "parameters": {},
+                },
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=processor,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                return_value=frame_source,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                return_value=records,
+            ) as run_trial,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+                return_value=expected_paths,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+                return_value=(
+                        Path("quality_samples"),
+                        Path("quality_samples_manifest.json"),
+                ),
+            ) as write_quality_artifacts,
+        ):
+            execute_pure_python_run(
+                {},
+                now_provider=lambda: next(
+                    timestamps
+                ),
+            )
+
+        write_quality_artifacts.assert_called_once_with(
+            output_directory=(
+                self.context.output_directory
+            ),
+            experiment_id=(
+                self.context.experiment_id
+            ),
+            run_id=self.context.run_id,
+            algorithm="gamma_correction",
+            width=640,
+            height=480,
+            config=quality_config,
+            samples=quality_samples,
+        )
+
+        run_trial.assert_called_once_with(
+            frame_source=frame_source,
+            processor=processor,
+            config=realtime_config,
+            architecture="pure_python",
+            algorithm="gamma_correction",
+            width=640,
+            height=480,
+            trial=1,
+            frame_capture_callback=(
+                quality_buffer.capture
+            ),
+        )
+
+    def test_missing_quality_sample_fails_run(
+            self,
+    ) -> None:
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=30,
+            measured_frames=500,
+        )
+
+        quality_config = QualityCaptureConfig(
+            enabled=True,
+            measured_frame_indices=(
+                0,
+                499,
+            ),
+            image_format="png",
+        )
+
+        quality_buffer = SimpleNamespace(
+            capture=Mock(),
+            missing_indices=(499,),
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_experiment_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_quality_capture_config",
+                return_value=quality_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "QualityCaptureBuffer",
+                return_value=quality_buffer,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                return_value=(object(),),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+            ) as write_artifacts,
+        ):
+            with self.assertRaisesRegex(
+                    ControlledIlluminationPurePythonRunnerError,
+                    "Missing measured frame indices",
+            ):
+                execute_pure_python_run(
+                    {},
+                    now_provider=lambda: STARTED_AT,
+                )
+
+        write_artifacts.assert_not_called()
+
+    def test_completed_artifact_failure_cleans_quality_artifacts(
+            self,
+    ) -> None:
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "0",
+        }
+
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=0,
+            measured_frames=500,
+        )
+
+        quality_config = QualityCaptureConfig(
+            enabled=True,
+            measured_frame_indices=(0,),
+            image_format="png",
+        )
+
+        quality_samples = (
+            object(),
+        )
+
+        quality_buffer = SimpleNamespace(
+            capture=Mock(),
+            missing_indices=(),
+            samples=quality_samples,
+        )
+
+        algorithm_config = {
+            "name": "gamma_correction",
+            "parameters": {
+                "gamma_value": 0.6,
+            },
+        }
+
+        processor = object()
+        frame_source = object()
+
+        timestamps = iter(
+            (
+                STARTED_AT,
+                FINISHED_AT,
+            )
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_experiment_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_quality_capture_config",
+                return_value=quality_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "QualityCaptureBuffer",
+                return_value=quality_buffer,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value=algorithm_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=processor,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                return_value=frame_source,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                return_value=[],
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+                return_value=(
+                        Path("quality_samples"),
+                        Path(
+                            "quality_samples_manifest.json"
+                        ),
+                ),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+                side_effect=OSError(
+                    "artifact failure"
+                ),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "cleanup_quality_capture_artifacts",
+            ) as cleanup_quality,
+        ):
+            with self.assertRaisesRegex(
+                    OSError,
+                    "artifact failure",
+            ):
+                execute_pure_python_run(
+                    environment,
+                    now_provider=lambda: next(
+                        timestamps
+                    ),
+                )
+
+        cleanup_quality.assert_called_once_with(
+            self.context.output_directory
+        )
 
 if __name__ == "__main__":
     unittest.main()

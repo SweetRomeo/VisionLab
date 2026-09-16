@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -5,6 +6,7 @@ import tempfile
 import unittest
 
 from benchmarks.experiments.controlled_illumination_metadata import (
+    ControlledIlluminationConfigError,
     ControlledIlluminationMetadataError,
     ControlledIlluminationRunMetadata,
     IlluminanceMeasurements,
@@ -13,6 +15,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     load_controlled_illumination_config,
     load_run_metadata,
     save_run_metadata_atomic,
+    validate_controlled_illumination_config,
     validate_run_metadata,
 )
 
@@ -373,6 +376,56 @@ class ControlledIlluminationMetadataTests(
             validate_run_metadata(
                 invalid_metadata,
                 self.config,
+            )
+
+    def test_quality_capture_is_validated_with_main_config(
+            self,
+    ) -> None:
+        config = deepcopy(
+            self.config
+        )
+
+        measured_frames = config[
+            "execution"
+        ]["measured_frames"]
+
+        config["quality_capture"] = {
+            "enabled": True,
+            "measured_frame_indices": [
+                0,
+                measured_frames - 1,
+            ],
+            "image_format": "png",
+        }
+
+        validate_controlled_illumination_config(
+            config
+        )
+
+    def test_invalid_quality_capture_is_rejected_by_main_config(
+            self,
+    ) -> None:
+        config = deepcopy(
+            self.config
+        )
+
+        measured_frames = config[
+            "execution"
+        ]["measured_frames"]
+
+        config["quality_capture"] = {
+            "enabled": True,
+            "measured_frame_indices": [
+                measured_frames,
+            ],
+            "image_format": "png",
+        }
+
+        with self.assertRaises(
+                ControlledIlluminationConfigError
+        ):
+            validate_controlled_illumination_config(
+                config
             )
 
 

@@ -48,6 +48,8 @@ class ValidatedQualitySample:
     measured_frame_index: int
     input_path: Path
     processed_path: Path
+    input_sha256: str
+    processed_sha256: str
     input_image: np.ndarray
     processed_image: np.ndarray
 
@@ -64,6 +66,128 @@ class ValidatedQualityRun:
         ...,
     ]
 
+@dataclass(frozen=True)
+class QualitySampleAnalysis:
+    experiment_id: str
+    run_id: str
+    algorithm: str
+    resolution_width: int
+    resolution_height: int
+    measured_frame_index: int
+    input_path: str
+    processed_path: str
+    input_sha256: str
+    processed_sha256: str
+
+    input_mean_intensity: float
+    processed_mean_intensity: float
+
+    input_intensity_std: float
+    processed_intensity_std: float
+
+    input_rms_contrast: float
+    processed_rms_contrast: float
+
+    input_dark_clipping_pct: float
+    processed_dark_clipping_pct: float
+
+    input_bright_clipping_pct: float
+    processed_bright_clipping_pct: float
+
+    mae: float
+    max_absolute_error: float
+    mse: float
+    psnr: float
+
+def analyze_quality_run(
+    run: ValidatedQualityRun,
+) -> tuple[QualitySampleAnalysis, ...]:
+    analyses: list[
+        QualitySampleAnalysis
+    ] = []
+
+    for sample in run.samples:
+        input_metrics = (
+            calculate_image_quality_metrics(
+                sample.input_image
+            )
+        )
+
+        processed_metrics = (
+            calculate_image_quality_metrics(
+                sample.processed_image
+            )
+        )
+
+        pair_metrics = (
+            calculate_image_pair_quality_metrics(
+                sample.input_image,
+                sample.processed_image,
+            )
+        )
+
+        analyses.append(
+            QualitySampleAnalysis(
+                experiment_id=run.experiment_id,
+                run_id=run.run_id,
+                algorithm=run.algorithm,
+                resolution_width=run.width,
+                resolution_height=run.height,
+                measured_frame_index=(
+                    sample.measured_frame_index
+                ),
+                input_path=str(
+                    sample.input_path
+                ),
+                processed_path=str(
+                    sample.processed_path
+                ),
+                input_sha256=(
+                    sample.input_sha256
+                ),
+                processed_sha256=(
+                    sample.processed_sha256
+                ),
+                input_mean_intensity=(
+                    input_metrics.mean_intensity
+                ),
+                processed_mean_intensity=(
+                    processed_metrics.mean_intensity
+                ),
+                input_intensity_std=(
+                    input_metrics.intensity_std
+                ),
+                processed_intensity_std=(
+                    processed_metrics.intensity_std
+                ),
+                input_rms_contrast=(
+                    input_metrics.rms_contrast
+                ),
+                processed_rms_contrast=(
+                    processed_metrics.rms_contrast
+                ),
+                input_dark_clipping_pct=(
+                    input_metrics.dark_clipping_pct
+                ),
+                processed_dark_clipping_pct=(
+                    processed_metrics.dark_clipping_pct
+                ),
+                input_bright_clipping_pct=(
+                    input_metrics.bright_clipping_pct
+                ),
+                processed_bright_clipping_pct=(
+                    processed_metrics.bright_clipping_pct
+                ),
+                mae=pair_metrics.mae,
+                max_absolute_error=(
+                    pair_metrics.max_absolute_error
+                ),
+                mse=pair_metrics.mse,
+                psnr=pair_metrics.psnr,
+            )
+        )
+
+    return tuple(analyses)
 
 def convert_to_grayscale(
     image: np.ndarray,
@@ -372,7 +496,7 @@ def load_and_validate_sample_image(
     *,
     expected_width: int,
     expected_height: int,
-) -> tuple[Path, np.ndarray]:
+) -> tuple[Path, str, np.ndarray]:
     relative_path = require_non_empty_string(
         metadata.get("path"),
         f"{field_name}.path",
@@ -473,7 +597,7 @@ def load_and_validate_sample_image(
             f"metadata for {image_path}."
         )
 
-    return image_path, image
+    return (image_path, actual_sha256, image)
 
 
 def load_and_validate_quality_capture_run(
@@ -677,7 +801,7 @@ def load_and_validate_quality_capture_run(
             f"samples[{sample_number}].processed",
         )
 
-        input_path, input_image = (
+        input_path, input_sha256, input_image = (
             load_and_validate_sample_image(
                 run_directory,
                 input_metadata,
@@ -687,7 +811,7 @@ def load_and_validate_quality_capture_run(
             )
         )
 
-        processed_path, processed_image = (
+        processed_path, processed_sha256, processed_image = (
             load_and_validate_sample_image(
                 run_directory,
                 processed_metadata,
@@ -708,11 +832,11 @@ def load_and_validate_quality_capture_run(
 
         samples.append(
             ValidatedQualitySample(
-                measured_frame_index=(
-                    measured_frame_index
-                ),
+                measured_frame_index=measured_frame_index,
                 input_path=input_path,
                 processed_path=processed_path,
+                input_sha256=input_sha256,
+                processed_sha256=processed_sha256,
                 input_image=input_image,
                 processed_image=processed_image,
             )

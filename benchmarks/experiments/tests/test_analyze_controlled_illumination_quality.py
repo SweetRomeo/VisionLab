@@ -10,6 +10,9 @@ from tempfile import TemporaryDirectory
 
 from benchmarks.experiments.analyze_controlled_illumination_quality import (
     ControlledIlluminationQualityAnalysisError,
+    ValidatedQualityRun,
+    ValidatedQualitySample,
+    analyze_quality_run,
     calculate_image_pair_quality_metrics,
     calculate_image_quality_metrics,
     convert_to_grayscale,
@@ -313,7 +316,7 @@ class QualityCaptureManifestValidationTests(
             )
 
     def test_valid_quality_capture_run_is_loaded(
-        self,
+            self,
     ) -> None:
         with TemporaryDirectory() as temporary:
             output_directory = Path(
@@ -361,6 +364,24 @@ class QualityCaptureManifestValidationTests(
                     0
                 ].measured_frame_index,
                 0,
+            )
+
+            self.assertEqual(
+                len(
+                    run.samples[
+                        0
+                    ].input_sha256
+                ),
+                64,
+            )
+
+            self.assertEqual(
+                len(
+                    run.samples[
+                        0
+                    ].processed_sha256
+                ),
+                64,
             )
 
     def test_missing_manifest_is_rejected(
@@ -570,6 +591,219 @@ class QualityCaptureManifestValidationTests(
                 load_and_validate_quality_capture_run(
                     output_directory
                 )
+
+class QualityRunAnalysisTests(
+    unittest.TestCase
+):
+    @staticmethod
+    def create_frame(
+        value: int,
+    ) -> np.ndarray:
+        return np.full(
+            (4, 6, 3),
+            value,
+            dtype=np.uint8,
+        )
+
+    def test_quality_run_is_analyzed(
+        self,
+    ) -> None:
+        sample = ValidatedQualitySample(
+            measured_frame_index=0,
+            input_path=Path("input.png"),
+            processed_path=Path("processed.png"),
+            input_sha256="a" * 64,
+            processed_sha256="b" * 64,
+            input_image=self.create_frame(10),
+            processed_image=self.create_frame(20),
+        )
+
+        run = ValidatedQualityRun(
+            experiment_id="experiment-test",
+            run_id="run-test",
+            algorithm="clahe",
+            width=6,
+            height=4,
+            samples=(
+                sample,
+            ),
+        )
+
+        analyses = analyze_quality_run(
+            run
+        )
+
+        self.assertEqual(
+            len(analyses),
+            1,
+        )
+
+        analysis = analyses[0]
+
+        self.assertEqual(
+            analysis.experiment_id,
+            "experiment-test",
+        )
+        self.assertEqual(
+            analysis.run_id,
+            "run-test",
+        )
+        self.assertEqual(
+            analysis.algorithm,
+            "clahe",
+        )
+        self.assertEqual(
+            analysis.resolution_width,
+            6,
+        )
+        self.assertEqual(
+            analysis.resolution_height,
+            4,
+        )
+        self.assertEqual(
+            analysis.measured_frame_index,
+            0,
+        )
+
+        self.assertEqual(
+            analysis.input_path,
+            "input.png",
+        )
+        self.assertEqual(
+            analysis.processed_path,
+            "processed.png",
+        )
+        self.assertEqual(
+            analysis.input_sha256,
+            "a" * 64,
+        )
+        self.assertEqual(
+            analysis.processed_sha256,
+            "b" * 64,
+        )
+
+        self.assertEqual(
+            analysis.input_mean_intensity,
+            10.0,
+        )
+        self.assertEqual(
+            analysis.processed_mean_intensity,
+            20.0,
+        )
+
+        self.assertEqual(
+            analysis.input_intensity_std,
+            0.0,
+        )
+        self.assertEqual(
+            analysis.processed_intensity_std,
+            0.0,
+        )
+
+        self.assertEqual(
+            analysis.input_rms_contrast,
+            0.0,
+        )
+        self.assertEqual(
+            analysis.processed_rms_contrast,
+            0.0,
+        )
+
+        self.assertEqual(
+            analysis.mae,
+            10.0,
+        )
+        self.assertEqual(
+            analysis.max_absolute_error,
+            10.0,
+        )
+        self.assertEqual(
+            analysis.mse,
+            100.0,
+        )
+
+    def test_multiple_samples_preserve_order(
+            self,
+    ) -> None:
+        run = ValidatedQualityRun(
+            experiment_id="experiment-test",
+            run_id="run-test",
+            algorithm="gamma_correction",
+            width=6,
+            height=4,
+            samples=(
+                ValidatedQualitySample(
+                    measured_frame_index=0,
+                    input_path=Path(
+                        "input0.png"
+                    ),
+                    processed_path=Path(
+                        "processed0.png"
+                    ),
+                    input_sha256="a" * 64,
+                    processed_sha256="b" * 64,
+                    input_image=self.create_frame(
+                        10
+                    ),
+                    processed_image=self.create_frame(
+                        20
+                    ),
+                ),
+                ValidatedQualitySample(
+                    measured_frame_index=124,
+                    input_path=Path(
+                        "input124.png"
+                    ),
+                    processed_path=Path(
+                        "processed124.png"
+                    ),
+                    input_sha256="c" * 64,
+                    processed_sha256="d" * 64,
+                    input_image=self.create_frame(
+                        30
+                    ),
+                    processed_image=self.create_frame(
+                        40
+                    ),
+                ),
+            ),
+        )
+
+        analyses = analyze_quality_run(
+            run
+        )
+
+        self.assertEqual(
+            [
+                analysis.measured_frame_index
+                for analysis in analyses
+            ],
+            [
+                0,
+                124,
+            ],
+        )
+
+    def test_empty_run_returns_empty_tuple(
+        self,
+    ) -> None:
+        run = ValidatedQualityRun(
+            experiment_id="experiment-test",
+            run_id="run-test",
+            algorithm="original",
+            width=6,
+            height=4,
+            samples=(),
+        )
+
+        analyses = analyze_quality_run(
+            run
+        )
+
+        self.assertEqual(
+            analyses,
+            (),
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -409,6 +409,78 @@ If the `quality_capture` section is absent, quality capture remains disabled and
 
 Quality artifacts must not overwrite an existing completed sample set. Publication uses temporary staging followed by atomic publication, with the manifest published as the completion marker. Failed capture or publication must not leave a completed quality-sample artifact set behind.
 
+### 11.2. Optical-quality analysis
+
+Completed quality-capture runs may be analyzed with the controlled-illumination optical-quality analysis pipeline.
+
+The analysis command is:
+
+```bash
+python -m benchmarks.experiments.analyze_controlled_illumination_quality \
+  --results-directory <results-directory> \
+  --output-directory <analysis-directory>
+```
+
+The analysis pipeline recursively discovers completed `quality_samples_manifest.json` files below the supplied results directory.
+
+Before calculating any metric, each discovered run is validated. Validation includes:
+
+* quality-capture manifest schema,
+* experiment and run identifiers,
+* configured measured-frame indices,
+* referenced input and processed image existence,
+* image dimensions,
+* image data type,
+* SHA-256 hashes,
+* complete sample coverage,
+* duplicate sample and run identities.
+
+Invalid, incomplete or modified quality-capture artifacts must cause analysis to fail rather than being silently skipped.
+
+For each captured input and processed image, the following descriptive metrics are calculated:
+
+* `mean_intensity`: arithmetic mean of the grayscale pixel values.
+* `intensity_std`: population standard deviation of the grayscale pixel values.
+* `rms_contrast`: standard deviation of grayscale intensity after normalization to the `[0, 1]` range, implemented as `intensity_std / 255`.
+* `dark_clipping_pct`: percentage of grayscale pixels with value `0`.
+* `bright_clipping_pct`: percentage of grayscale pixels with value `255`.
+
+For each corresponding input and processed image pair, the following difference metrics are calculated:
+
+* Mean absolute error (`MAE`).
+* Maximum absolute error.
+* Mean squared error (`MSE`).
+* Peak signal-to-noise ratio (`PSNR`), using a maximum uint8 signal value of `255`.
+
+When MSE is zero, the corresponding PSNR is infinite because the two images are identical.
+
+Input-versus-processed MAE, MSE and PSNR describe the magnitude of the transformation applied by an enhancement algorithm. They must not, by themselves, be interpreted as measures of perceptual image quality or as evidence that one enhancement algorithm is superior to another.
+
+Reference-based quality metrics such as SSIM may only be interpreted as reference-image quality measurements when a geometrically compatible and explicitly defined reference image is available. Reference-image alignment is outside the scope of the current analysis pipeline.
+
+The analysis generates two machine-readable files:
+
+```text
+<analysis-directory>/
+├── optical_quality_samples.csv
+└── optical_quality_trial_summary.csv
+```
+
+`optical_quality_samples.csv` contains one row for each captured measured-frame sample and includes:
+
+* experiment and run identifiers,
+* algorithm and resolution,
+* measured-frame index,
+* input and processed image paths,
+* SHA-256 hashes,
+* input and processed descriptive metrics,
+* input-versus-processed difference metrics.
+
+`optical_quality_trial_summary.csv` contains one row for each completed run and aggregates the captured samples belonging to that run.
+
+Individual captured frames within a trial must not be treated as independent experimental repetitions. Statistical comparisons between experimental conditions must use independent trials as the repetition unit. Sample-level measurements describe within-trial observations, while trial-level summaries provide the appropriate unit for subsequent condition-level statistical analysis.
+
+The analysis outputs are generated artifacts and must not be committed to the repository.
 
 ## 12. Randomization and independence
 

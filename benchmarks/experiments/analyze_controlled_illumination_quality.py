@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import os
+import argparse
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -1531,3 +1532,80 @@ def write_quality_trial_summary_csv(
         )
 
     return output_path
+
+def build_argument_parser(
+) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Analyze controlled-illumination "
+            "optical-quality capture artifacts."
+        )
+    )
+
+    parser.add_argument(
+        "--results-directory",
+        type=Path,
+        required=True,
+        help=(
+            "Directory containing completed "
+            "controlled-illumination runs."
+        ),
+    )
+
+    parser.add_argument(
+        "--output-directory",
+        type=Path,
+        required=True,
+        help=(
+            "Directory where optical-quality "
+            "analysis CSV files will be written."
+        ),
+    )
+
+    return parser
+
+
+def main(
+    argv: list[str] | None = None,
+) -> int:
+    parser = build_argument_parser()
+
+    arguments = parser.parse_args(
+        argv
+    )
+
+    try:
+        (
+            sample_output_path,
+            summary_output_path,
+        ) = analyze_quality_capture_results(
+            arguments.results_directory,
+            arguments.output_directory,
+        )
+
+    except ControlledIlluminationQualityAnalysisError as error:
+        parser.exit(
+            status=1,
+            message=f"error: {error}\n",
+        )
+
+    print(
+        "Controlled-illumination optical-quality "
+        "analysis completed."
+    )
+    print(
+        f"Sample analysis: "
+        f"{sample_output_path}"
+    )
+    print(
+        f"Trial summary: "
+        f"{summary_output_path}"
+    )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(
+        main()
+    )

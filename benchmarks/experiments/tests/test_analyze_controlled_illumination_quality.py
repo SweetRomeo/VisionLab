@@ -29,6 +29,8 @@ from benchmarks.experiments.analyze_controlled_illumination_quality import (
     OPTICAL_QUALITY_SAMPLES_FILE_NAME,
     OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME,
     analyze_quality_capture_results,
+    build_argument_parser,
+    main,
 )
 
 from benchmarks.experiments.controlled_illumination_quality_capture import (
@@ -1575,6 +1577,108 @@ class QualityCaptureResultsAnalysisTests(
                         / OPTICAL_QUALITY_TRIAL_SUMMARY_FILE_NAME
                 ).exists()
             )
+
+class QualityAnalysisCliTests(
+    unittest.TestCase
+):
+    def test_required_arguments_are_parsed(
+        self,
+    ) -> None:
+        parser = build_argument_parser()
+
+        arguments = parser.parse_args(
+            [
+                "--results-directory",
+                "results",
+                "--output-directory",
+                "analysis",
+            ]
+        )
+
+        self.assertEqual(
+            arguments.results_directory,
+            Path("results"),
+        )
+        self.assertEqual(
+            arguments.output_directory,
+            Path("analysis"),
+        )
+
+    def test_main_reports_success(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(
+                temporary
+            )
+
+            sample_path = (
+                root
+                / "optical_quality_samples.csv"
+            )
+
+            summary_path = (
+                root
+                / "optical_quality_trial_summary.csv"
+            )
+
+            with patch(
+                "benchmarks.experiments."
+                "analyze_controlled_illumination_quality."
+                "analyze_quality_capture_results",
+                return_value=(
+                    sample_path,
+                    summary_path,
+                ),
+            ):
+                result = main(
+                    [
+                        "--results-directory",
+                        str(root / "results"),
+                        "--output-directory",
+                        str(root / "analysis"),
+                    ]
+                )
+
+        self.assertEqual(
+            result,
+            0,
+        )
+
+    def test_main_exits_on_analysis_error(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            root = Path(
+                temporary
+            )
+
+            with patch(
+                "benchmarks.experiments."
+                "analyze_controlled_illumination_quality."
+                "analyze_quality_capture_results",
+                side_effect=(
+                    ControlledIlluminationQualityAnalysisError(
+                        "analysis failed"
+                    )
+                ),
+            ):
+                with self.assertRaises(
+                    SystemExit
+                ) as context:
+                    main(
+                        [
+                            "--results-directory",
+                            str(root / "results"),
+                            "--output-directory",
+                            str(root / "analysis"),
+                        ]
+                    )
+
+        self.assertEqual(
+            context.exception.code,
+            1,
+        )
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,10 +40,10 @@ from benchmarks.experiments.controlled_illumination_metadata import (
 
 from benchmarks.experiments.controlled_illumination_quality_capture import (
     QualityCaptureBuffer,
+    cleanup_quality_capture_artifacts,
     load_quality_capture_config,
     write_quality_capture_artifacts_atomic,
 )
-
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -353,6 +353,8 @@ def execute_pure_python_run(
 
     finished_at_utc = now_provider()
 
+    quality_artifacts_written = False
+
     if quality_capture_config.enabled:
         write_quality_capture_artifacts_atomic(
             output_directory=(
@@ -367,17 +369,27 @@ def execute_pure_python_run(
             samples=quality_capture_buffer.samples,
         )
 
-    artifact_paths = (
-        write_completed_run_artifacts_atomic(
-            context,
-            frame_records,
-            started_at_utc=started_at_utc,
-            finished_at_utc=finished_at_utc,
-            warmup_frame_count=(
-                realtime_config.warmup_frames
-            ),
+        quality_artifacts_written = True
+
+    try:
+        artifact_paths = (
+            write_completed_run_artifacts_atomic(
+                context,
+                frame_records,
+                started_at_utc=started_at_utc,
+                finished_at_utc=finished_at_utc,
+                warmup_frame_count=(
+                    realtime_config.warmup_frames
+                ),
+            )
         )
-    )
+    except Exception:
+        if quality_artifacts_written:
+            cleanup_quality_capture_artifacts(
+                context.output_directory
+            )
+
+        raise
 
     return artifact_paths
 

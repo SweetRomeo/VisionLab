@@ -789,3 +789,21 @@ def write_quality_capture_artifacts_atomic(
         )
 
     return samples_directory, manifest_path
+
+def cleanup_quality_capture_artifacts(
+    output_directory: Path,
+) -> None:
+    samples_directory = (
+        output_directory
+        / QUALITY_SAMPLES_DIRECTORY_NAME
+    )
+    manifest_path = (
+        output_directory
+        / QUALITY_SAMPLES_MANIFEST_FILE_NAME
+    )
+
+    if manifest_path.exists():
+        manifest_path.unlink()
+
+    if samples_directory.exists():
+        shutil.rmtree(samples_directory)

@@ -210,10 +210,25 @@ def build_planned_run_environment(
 
 def load_runner_registry(
     config_path: str | Path,
+    *,
+    experiment_config_path: str | Path | None = None,
 ) -> ArchitectureRunnerRegistry:
     resolved_config_path = Path(
         config_path
     ).resolve()
+
+    resolved_experiment_config_path = None
+
+    if experiment_config_path is not None:
+        resolved_experiment_config_path = Path(
+            experiment_config_path
+        ).resolve()
+
+        if not resolved_experiment_config_path.is_file():
+            raise ControlledIlluminationExecutionError(
+                "Experiment configuration could not be found: "
+                f"{resolved_experiment_config_path}"
+            )
 
     try:
         with resolved_config_path.open(
@@ -340,6 +355,14 @@ def load_runner_registry(
             execution_environment = dict(
                 command_environment
             )
+
+            if resolved_experiment_config_path is not None:
+                execution_environment[
+                    "VISIONLAB_EXPERIMENT_CONFIG"
+                ] = str(
+                    resolved_experiment_config_path
+                )
+
             execution_environment.update(
                 build_planned_run_environment(
                     planned_run
@@ -395,6 +418,13 @@ def create_argument_parser() -> argparse.ArgumentParser:
             "configuration JSON file."
         ),
     )
+    parser.add_argument(
+        "--experiment-config",
+        help=(
+            "Controlled-illumination experiment "
+            "configuration passed to architecture runners."
+        ),
+    )
     return parser
 
 
@@ -411,7 +441,10 @@ def run_cli(
         arguments.progress,
     )
     runner_registry = load_runner_registry(
-        arguments.runner_config
+        arguments.runner_config,
+        experiment_config_path=(
+            arguments.experiment_config
+        ),
     )
 
     outcome = execute_next_planned_run_from_files(

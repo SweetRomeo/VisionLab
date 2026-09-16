@@ -5,6 +5,7 @@ import numpy as np
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import cv2
 
@@ -547,6 +548,120 @@ class QualityCaptureConfigTests(
                             self.create_samples()[0],
                         ),
                     )
+
+        def test_write_failure_cleans_up_quality_artifacts(
+                self,
+        ) -> None:
+            config = QualityCaptureConfig(
+                enabled=True,
+                measured_frame_indices=(0,),
+                image_format="png",
+            )
+
+            frame = np.zeros(
+                (4, 6, 3),
+                dtype=np.uint8,
+            )
+
+            samples = (
+                CapturedQualitySample(
+                    measured_frame_index=0,
+                    input_frame=frame,
+                    processed_frame=frame,
+                ),
+            )
+
+            with TemporaryDirectory() as temporary:
+                output_directory = Path(temporary)
+
+                with patch(
+                        "benchmarks.experiments."
+                        "controlled_illumination_quality_capture."
+                        "write_bytes_durable",
+                        side_effect=OSError("disk failure"),
+                ):
+                    with self.assertRaises(OSError):
+                        write_quality_capture_artifacts_atomic(
+                            output_directory=output_directory,
+                            experiment_id="experiment-test",
+                            run_id="run-test",
+                            algorithm="original",
+                            width=6,
+                            height=4,
+                            config=config,
+                            samples=samples,
+                        )
+
+                self.assertFalse(
+                    (
+                            output_directory
+                            / "quality_samples"
+                    ).exists()
+                )
+
+                self.assertFalse(
+                    (
+                            output_directory
+                            / "quality_samples_manifest.json"
+                    ).exists()
+                )
+
+        def test_manifest_failure_cleans_up_quality_artifacts(
+                self,
+        ) -> None:
+            config = QualityCaptureConfig(
+                enabled=True,
+                measured_frame_indices=(0,),
+                image_format="png",
+            )
+
+            frame = np.zeros(
+                (4, 6, 3),
+                dtype=np.uint8,
+            )
+
+            samples = (
+                CapturedQualitySample(
+                    measured_frame_index=0,
+                    input_frame=frame,
+                    processed_frame=frame,
+                ),
+            )
+
+            with TemporaryDirectory() as temporary:
+                output_directory = Path(temporary)
+
+                with patch(
+                        "benchmarks.experiments."
+                        "controlled_illumination_quality_capture."
+                        "write_json_durable",
+                        side_effect=OSError("manifest failure"),
+                ):
+                    with self.assertRaises(OSError):
+                        write_quality_capture_artifacts_atomic(
+                            output_directory=output_directory,
+                            experiment_id="experiment-test",
+                            run_id="run-test",
+                            algorithm="original",
+                            width=6,
+                            height=4,
+                            config=config,
+                            samples=samples,
+                        )
+
+                self.assertFalse(
+                    (
+                            output_directory
+                            / "quality_samples"
+                    ).exists()
+                )
+
+                self.assertFalse(
+                    (
+                            output_directory
+                            / "quality_samples_manifest.json"
+                    ).exists()
+                )
 
 
 if __name__ == "__main__":

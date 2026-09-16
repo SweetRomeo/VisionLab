@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from benchmarks.experiments.controlled_illumination_quality_capture import (
+    QualityCaptureConfigError,
+    load_quality_capture_config,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -552,12 +556,26 @@ def validate_controlled_illumination_config(
         )
     )
 
-    validate_execution_config(
-        require_mapping(
-            config.get("execution"),
-            "execution",
-        )
+    execution = require_mapping(
+        config.get("execution"),
+        "execution",
     )
+
+    validate_execution_config(
+        execution
+    )
+
+    try:
+        load_quality_capture_config(
+            config,
+            measured_frames=execution[
+                "measured_frames"
+            ],
+        )
+    except QualityCaptureConfigError as error:
+        raise ControlledIlluminationConfigError(
+            str(error)
+        ) from error
 
     illuminance_measurement = require_mapping(
         config.get("illuminance_measurement"),

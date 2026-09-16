@@ -104,6 +104,99 @@ class RealtimePipelineTests(unittest.TestCase):
             )
         )
 
+    def test_frame_capture_callback_receives_measured_frames(
+            self,
+    ) -> None:
+        config = self.create_config(
+            warmup_frames=1,
+            measured_frames=3,
+        )
+
+        captured_frames = []
+
+        def capture_callback(
+                frame_index: int,
+                input_frame: np.ndarray,
+                processed_frame: np.ndarray,
+        ) -> None:
+            captured_frames.append(
+                (
+                    frame_index,
+                    input_frame.copy(),
+                    processed_frame.copy(),
+                )
+            )
+
+        def processor(
+                frame: np.ndarray,
+        ) -> np.ndarray:
+            return frame + 10
+
+        run_realtime_trial(
+            frame_source=self.create_frames(4),
+            processor=processor,
+            config=config,
+            architecture="pure_python",
+            algorithm="original",
+            width=16,
+            height=12,
+            trial=1,
+            frame_capture_callback=capture_callback,
+        )
+
+        self.assertEqual(
+            [
+                frame_index
+                for (
+                frame_index,
+                _,
+                _,
+            ) in captured_frames
+            ],
+            [
+                0,
+                1,
+                2,
+            ],
+        )
+
+        self.assertTrue(
+            np.array_equal(
+                captured_frames[0][1],
+                self.create_frames(4)[1],
+            )
+        )
+
+        self.assertTrue(
+            np.array_equal(
+                captured_frames[0][2],
+                self.create_frames(4)[1] + 10,
+            )
+        )
+
+    def test_invalid_frame_capture_callback_is_rejected(
+            self,
+    ) -> None:
+        config = self.create_config(
+            measured_frames=1,
+        )
+
+        with self.assertRaisesRegex(
+                TypeError,
+                "frame_capture_callback",
+        ):
+            run_realtime_trial(
+                frame_source=self.create_frames(1),
+                processor=self.copy_processor,
+                config=config,
+                architecture="pure_python",
+                algorithm="original",
+                width=16,
+                height=12,
+                trial=1,
+                frame_capture_callback=123,
+            )
+
     def test_slow_processor_misses_deadline(
         self,
     ) -> None:

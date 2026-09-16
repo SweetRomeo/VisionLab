@@ -20,6 +20,7 @@ from benchmarks.experiments.analyze_controlled_illumination_quality import (
     calculate_image_pair_quality_metrics,
     calculate_image_quality_metrics,
     convert_to_grayscale,
+    discover_quality_capture_runs,
     load_and_validate_quality_capture_run,
     summarize_quality_trial,
     write_quality_sample_analysis_csv,
@@ -1093,6 +1094,204 @@ class QualityTrialSummaryCsvTests(
                         summary,
                         summary,
                     ),
+                )
+
+class QualityCaptureRunDiscoveryTests(
+    unittest.TestCase
+):
+    @staticmethod
+    def create_manifest(
+        run_directory: Path,
+    ) -> None:
+        run_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        manifest_path = (
+            run_directory
+            / "quality_samples_manifest.json"
+        )
+
+        manifest_path.write_text(
+            "{}",
+            encoding="utf-8",
+        )
+
+    def test_quality_capture_runs_are_discovered(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            results_directory = Path(
+                temporary
+            )
+
+            run_a = (
+                results_directory
+                / "experiment-a"
+                / "run-a"
+            )
+
+            run_b = (
+                results_directory
+                / "experiment-a"
+                / "run-b"
+            )
+
+            self.create_manifest(
+                run_a
+            )
+            self.create_manifest(
+                run_b
+            )
+
+            discovered = (
+                discover_quality_capture_runs(
+                    results_directory
+                )
+            )
+
+            self.assertEqual(
+                discovered,
+                (
+                    run_a.resolve(),
+                    run_b.resolve(),
+                ),
+            )
+
+    def test_nested_runs_are_discovered(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            results_directory = Path(
+                temporary
+            )
+
+            run_directory = (
+                results_directory
+                / "profile"
+                / "algorithm"
+                / "resolution"
+                / "trial-1"
+            )
+
+            self.create_manifest(
+                run_directory
+            )
+
+            discovered = (
+                discover_quality_capture_runs(
+                    results_directory
+                )
+            )
+
+            self.assertEqual(
+                discovered,
+                (
+                    run_directory.resolve(),
+                ),
+            )
+
+    def test_discovery_order_is_deterministic(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            results_directory = Path(
+                temporary
+            )
+
+            run_z = (
+                results_directory
+                / "z-run"
+            )
+
+            run_a = (
+                results_directory
+                / "a-run"
+            )
+
+            run_m = (
+                results_directory
+                / "m-run"
+            )
+
+            self.create_manifest(
+                run_z
+            )
+            self.create_manifest(
+                run_a
+            )
+            self.create_manifest(
+                run_m
+            )
+
+            discovered = (
+                discover_quality_capture_runs(
+                    results_directory
+                )
+            )
+
+            self.assertEqual(
+                discovered,
+                (
+                    run_a.resolve(),
+                    run_m.resolve(),
+                    run_z.resolve(),
+                ),
+            )
+
+    def test_directory_without_runs_returns_empty_tuple(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            discovered = (
+                discover_quality_capture_runs(
+                    Path(temporary)
+                )
+            )
+
+            self.assertEqual(
+                discovered,
+                (),
+            )
+
+    def test_missing_results_directory_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            missing_directory = (
+                Path(temporary)
+                / "missing"
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationQualityAnalysisError,
+                "was not found",
+            ):
+                discover_quality_capture_runs(
+                    missing_directory
+                )
+
+    def test_file_path_is_rejected(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            file_path = (
+                Path(temporary)
+                / "results.txt"
+            )
+
+            file_path.write_text(
+                "not a directory",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ControlledIlluminationQualityAnalysisError,
+                "must be a directory",
+            ):
+                discover_quality_capture_runs(
+                    file_path
                 )
 
 if __name__ == "__main__":

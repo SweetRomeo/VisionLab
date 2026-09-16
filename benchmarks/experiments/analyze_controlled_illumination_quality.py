@@ -1083,6 +1083,45 @@ def load_and_validate_quality_capture_run(
         ),
     )
 
+def discover_quality_capture_runs(
+    results_directory: Path,
+) -> tuple[Path, ...]:
+    results_directory = Path(
+        results_directory
+    ).resolve()
+
+    if not results_directory.exists():
+        raise ControlledIlluminationQualityAnalysisError(
+            "Controlled-illumination results "
+            "directory was not found: "
+            f"{results_directory}"
+        )
+
+    if not results_directory.is_dir():
+        raise ControlledIlluminationQualityAnalysisError(
+            "Controlled-illumination results path "
+            "must be a directory: "
+            f"{results_directory}"
+        )
+
+    manifest_paths = tuple(
+        sorted(
+            results_directory.rglob(
+                QUALITY_SAMPLES_MANIFEST_FILE_NAME
+            ),
+            key=lambda path: (
+                path.as_posix()
+            ),
+        )
+    )
+
+    run_directories = tuple(
+        manifest_path.parent.resolve()
+        for manifest_path in manifest_paths
+    )
+
+    return run_directories
+
 def write_quality_sample_analysis_csv(
     output_path: Path,
     analyses: tuple[

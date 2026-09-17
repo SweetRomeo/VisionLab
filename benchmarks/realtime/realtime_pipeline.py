@@ -11,6 +11,12 @@ from time import perf_counter_ns
 import cv2
 import numpy as np
 
+from benchmarks.realtime.camera_controls import (
+    CameraControlRequest,
+    CameraControlResult,
+    apply_camera_controls,
+)
+
 from benchmarks.realtime.latest_frame_queue import (
     LatestFrameQueue,
     ScheduledFrame,
@@ -79,8 +85,24 @@ def iter_camera_frames(
     width: int | None = None,
     height: int | None = None,
     fps: float | None = None,
+    camera_controls: tuple[
+        CameraControlRequest,
+        ...,
+    ] = (),
     capture_mode_reporter: (
         Callable[[int, int, float], None]
+        | None
+    ) = None,
+    camera_controls_reporter: (
+        Callable[
+            [
+                tuple[
+                    CameraControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
         | None
     ) = None,
 ) -> Iterator[np.ndarray]:
@@ -147,6 +169,26 @@ def iter_camera_frames(
         raise ValueError(
             "capture mode reporting requires "
             "width, height, and fps."
+        )
+
+    if not isinstance(
+            camera_controls,
+            tuple,
+    ):
+        raise TypeError(
+            "camera_controls must be a tuple."
+        )
+
+    if (
+            camera_controls_reporter
+            is not None
+            and not callable(
+        camera_controls_reporter
+    )
+    ):
+        raise TypeError(
+            "camera_controls_reporter must "
+            "be callable."
         )
 
     capture = cv2.VideoCapture(
@@ -289,6 +331,21 @@ def iter_camera_frames(
                     "Camera FPS does not match "
                     "the requested value."
                 )
+
+        camera_control_results = (
+            apply_camera_controls(
+                capture,
+                camera_controls,
+            )
+        )
+
+        if (
+            camera_controls_reporter
+            is not None
+        ):
+            camera_controls_reporter(
+                camera_control_results
+            )
 
         if capture_mode_reporter is not None:
             capture_mode_reporter(

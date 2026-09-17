@@ -6,7 +6,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock,patch
+from unittest.mock import ANY,Mock,patch
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -354,6 +354,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             height=480,
             fps=30.0,
             camera_controls=(),
+            camera_controls_reporter=ANY,
             environment=environment,
         )
         run_trial.assert_called_once_with(
@@ -546,6 +547,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             height=480,
             fps=30.0,
             camera_controls=(),
+            camera_controls_reporter=None,
         )
         resolve_video.assert_not_called()
         iter_video.assert_not_called()
@@ -1145,9 +1147,8 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
-            camera_controls=(
-                camera_controls
-            ),
+            camera_controls=camera_controls,
+            camera_controls_reporter=None,
         )
 
         resolve_video.assert_not_called()
@@ -1272,6 +1273,70 @@ class ControlledIlluminationPurePythonRunnerTests(
                     }
                 }
             )
+
+    def test_camera_input_forwards_camera_controls_reporter(
+            self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+
+        frame_source = object()
+
+        camera_controls = (
+            CameraControlRequest(
+                name="exposure",
+                property_id=15,
+                requested_value=-6.0,
+            ),
+        )
+
+        reporter = Mock()
+
+        with patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+                return_value=frame_source,
+        ) as iter_camera:
+            selected_source = (
+                pure_python_runner
+                .create_frame_source(
+                    benchmark_config,
+                    width=640,
+                    height=480,
+                    fps=30.0,
+                    camera_controls=(
+                        camera_controls
+                    ),
+                    camera_controls_reporter=(
+                        reporter
+                    ),
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": (
+                            "camera"
+                        ),
+                        "VISIONLAB_CAMERA_INDEX": "2",
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_camera.assert_called_once_with(
+            2,
+            width=640,
+            height=480,
+            fps=30.0,
+            camera_controls=(
+                camera_controls
+            ),
+            camera_controls_reporter=(
+                reporter
+            ),
+        )
 
 if __name__ == "__main__":
     unittest.main()

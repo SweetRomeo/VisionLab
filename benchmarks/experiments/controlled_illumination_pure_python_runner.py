@@ -47,6 +47,7 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
 from benchmarks.realtime.camera_controls import (
     CameraControlProfile,
     CameraControlRequest,
+    CameraControlResult,
     create_camera_control_requests,
 )
 
@@ -212,6 +213,18 @@ def create_frame_source(
         CameraControlRequest,
         ...,
     ] = (),
+    camera_controls_reporter: (
+        Callable[
+            [
+                tuple[
+                    CameraControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
+        | None
+    ) = None,
     environment: Mapping[str, str] | None = None,
 ) -> Any:
     active_environment = (
@@ -285,6 +298,9 @@ def create_frame_source(
             height=height,
             fps=fps,
             camera_controls=camera_controls,
+            camera_controls_reporter=(
+                camera_controls_reporter
+            ),
         )
 
     raise ControlledIlluminationPurePythonRunnerError(
@@ -400,6 +416,20 @@ def execute_pure_python_run(
         )
     )
 
+    effective_camera_controls: tuple[
+        CameraControlResult,
+        ...,
+    ] = ()
+
+    def report_camera_controls(
+            results: tuple[
+                CameraControlResult,
+                ...,
+            ],
+    ) -> None:
+        nonlocal effective_camera_controls
+        effective_camera_controls = results
+
     quality_capture_config = (
         load_quality_capture_config(
             experiment_config,
@@ -438,6 +468,9 @@ def execute_pure_python_run(
         height=planned_run.resolution.height,
         fps=realtime_config.target_fps,
         camera_controls=camera_controls,
+        camera_controls_reporter=(
+            report_camera_controls
+        ),
         environment=environment,
     )
 

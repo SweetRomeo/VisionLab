@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import cv2
 from typing import Protocol
 
 
@@ -44,6 +45,81 @@ class CameraControlResult:
     verified: bool
     matches_requested: bool | None
 
+OPENCV_CAMERA_CONTROL_PROPERTIES: dict[
+    str,
+    int,
+] = {
+    "auto_exposure": (
+        cv2.CAP_PROP_AUTO_EXPOSURE
+    ),
+    "exposure": (
+        cv2.CAP_PROP_EXPOSURE
+    ),
+    "gain": (
+        cv2.CAP_PROP_GAIN
+    ),
+    "auto_white_balance": (
+        cv2.CAP_PROP_AUTO_WB
+    ),
+    "white_balance_temperature": (
+        cv2.CAP_PROP_WB_TEMPERATURE
+    ),
+    "autofocus": (
+        cv2.CAP_PROP_AUTOFOCUS
+    ),
+    "focus": (
+        cv2.CAP_PROP_FOCUS
+    ),
+}
+
+def create_opencv_camera_control_request(
+    name: str,
+    requested_value: float,
+    *,
+    required: bool = True,
+    verify: bool = True,
+    absolute_tolerance: float = 0.0,
+) -> CameraControlRequest:
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+    ):
+        raise ValueError(
+            "Camera control name must be a "
+            "non-empty string."
+        )
+
+    normalized_name = (
+        name.strip().lower()
+    )
+
+    property_id = (
+        OPENCV_CAMERA_CONTROL_PROPERTIES
+        .get(normalized_name)
+    )
+
+    if property_id is None:
+        raise ValueError(
+            "Unsupported OpenCV camera control: "
+            f"{normalized_name}"
+        )
+
+    request = CameraControlRequest(
+        name=normalized_name,
+        property_id=property_id,
+        requested_value=requested_value,
+        required=required,
+        verify=verify,
+        absolute_tolerance=(
+            absolute_tolerance
+        ),
+    )
+
+    validate_camera_control_request(
+        request
+    )
+
+    return request
 
 def validate_camera_control_request(
     request: CameraControlRequest,

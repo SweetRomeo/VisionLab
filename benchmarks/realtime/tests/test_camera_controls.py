@@ -1,4 +1,5 @@
 import unittest
+import cv2
 from unittest.mock import MagicMock
 
 from benchmarks.realtime.camera_controls import (
@@ -6,6 +7,7 @@ from benchmarks.realtime.camera_controls import (
     CameraControlRequest,
     apply_camera_control,
     apply_camera_controls,
+    create_opencv_camera_control_request,
 )
 
 
@@ -218,6 +220,68 @@ class CameraControlTests(
                 requests,
             )
 
+    def test_opencv_exposure_request_uses_expected_property(
+            self,
+    ) -> None:
+        request = (
+            create_opencv_camera_control_request(
+                "exposure",
+                -6.0,
+            )
+        )
+
+        self.assertEqual(
+            request.name,
+            "exposure",
+        )
+        self.assertEqual(
+            request.property_id,
+            cv2.CAP_PROP_EXPOSURE,
+        )
+        self.assertEqual(
+            request.requested_value,
+            -6.0,
+        )
+
+    def test_opencv_focus_request_preserves_options(
+            self,
+    ) -> None:
+        request = (
+            create_opencv_camera_control_request(
+                "focus",
+                25.0,
+                required=False,
+                verify=True,
+                absolute_tolerance=1.0,
+            )
+        )
+
+        self.assertEqual(
+            request.property_id,
+            cv2.CAP_PROP_FOCUS,
+        )
+        self.assertFalse(
+            request.required
+        )
+        self.assertTrue(
+            request.verify
+        )
+        self.assertEqual(
+            request.absolute_tolerance,
+            1.0,
+        )
+
+    def test_unknown_opencv_control_is_rejected(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ValueError,
+                "Unsupported OpenCV camera control",
+        ):
+            create_opencv_camera_control_request(
+                "unknown-control",
+                1.0,
+            )
 
 if __name__ == "__main__":
     unittest.main()

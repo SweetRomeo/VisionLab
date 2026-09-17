@@ -46,6 +46,7 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
 )
 from benchmarks.realtime.camera_controls import (
     CameraControlProfile,
+    CameraControlRequest,
     CameraControlResult,
     camera_control_results_to_metadata,
     create_camera_control_requests,

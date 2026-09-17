@@ -226,7 +226,29 @@ Confirm that:
 * The run-bundle manifest hashes the final synchronized metadata file.
 * No temporary artifact files remain.
 
-## 11. Video-path regression
+## 11. Quality-capture verification
+
+After the physical pilot run:
+
+- Confirm that the configured quality-sample PNG files exist.
+- Confirm that `quality_samples_manifest.json` exists.
+- Verify that the recorded SHA-256 values match the captured files.
+- Confirm that all configured measured-frame sample indices are present.
+
+Do not accept the pilot if any required sample or hash is missing or
+inconsistent.
+
+## 12. Optical-quality analysis
+
+Run the existing optical-quality analysis pipeline:
+
+```bash
+python -m benchmarks.experiments.analyze_controlled_illumination_quality \
+  --results-directory <pilot-results-directory> \
+  --output-directory <analysis-directory>
+```
+
+## 13. Video-path regression
 
 The existing video-input benchmark path must remain valid.
 
@@ -243,7 +265,7 @@ python -m unittest discover \
 -v
 ```
 
-## 12. Pilot completion gate
+## 14. Pilot completion gate
 
 The full optical-screening dataset may begin only after the physical
 pilot demonstrates all of the following:
@@ -258,6 +280,11 @@ pilot demonstrates all of the following:
 * Finalized artifact hashes remain valid.
 * The video-input path remains unchanged.
 * The complete automated test suite passes.
+* Quality-sample PNGs and manifest hashes are valid. 
+* Optical-quality analysis completes successfully.
+* `optical_quality_samples.csv` is generated and inspected.
+* `optical_quality_trial_summary.csv` is generated and inspected. 
+* Captured samples show no unexpected automatic camera adjustment.
 
 Only after these conditions are satisfied should the planned 300-run
 optical-screening dataset be collected.

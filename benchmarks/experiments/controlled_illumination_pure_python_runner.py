@@ -44,6 +44,13 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
     load_quality_capture_config,
     write_quality_capture_artifacts_atomic,
 )
+from benchmarks.realtime.camera_controls import (
+    CameraControlProfile,
+    CameraControlRequest,
+    CameraControlResult,
+    camera_control_results_to_metadata,
+    create_camera_control_requests,
+)
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -102,12 +109,123 @@ def load_experiment_config(
         Path(raw_config_path.strip())
     )
 
+def load_camera_control_profile(
+    experiment_config: dict[str, Any],
+) -> CameraControlProfile:
+    raw_profile = experiment_config.get(
+        "camera_control_profile"
+    )
+
+    if raw_profile is None:
+        return CameraControlProfile()
+
+    if not isinstance(
+        raw_profile,
+        dict,
+    ):
+        raise ControlledIlluminationPurePythonRunnerError(
+            "camera_control_profile must be an object."
+        )
+
+    supported_fields = {
+        "auto_exposure",
+        "exposure",
+        "gain",
+        "auto_white_balance",
+        "white_balance_temperature",
+        "autofocus",
+        "focus",
+    }
+
+    unknown_fields = (
+        set(raw_profile)
+        - supported_fields
+    )
+
+    if unknown_fields:
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Unsupported camera control profile fields: "
+            f"{sorted(unknown_fields)}"
+        )
+
+    try:
+        profile = CameraControlProfile(
+            auto_exposure=(
+                raw_profile.get(
+                    "auto_exposure"
+                )
+            ),
+            exposure=(
+                raw_profile.get(
+                    "exposure"
+                )
+            ),
+            gain=(
+                raw_profile.get(
+                    "gain"
+                )
+            ),
+            auto_white_balance=(
+                raw_profile.get(
+                    "auto_white_balance"
+                )
+            ),
+            white_balance_temperature=(
+                raw_profile.get(
+                    "white_balance_temperature"
+                )
+            ),
+            autofocus=(
+                raw_profile.get(
+                    "autofocus"
+                )
+            ),
+            focus=(
+                raw_profile.get(
+                    "focus"
+                )
+            ),
+        )
+
+        # Also validates relationships such as:
+        # manual exposure -> explicit auto_exposure.
+        create_camera_control_requests(
+            profile
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as error:
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Invalid camera_control_profile: "
+            f"{error}"
+        ) from error
+
+    return profile
+
 def create_frame_source(
     benchmark_config: dict[str, Any],
     *,
     width: int | None = None,
     height: int | None = None,
     fps: float | None = None,
+    camera_controls: tuple[
+        CameraControlRequest,
+        ...,
+    ] = (),
+    camera_controls_reporter: (
+        Callable[
+            [
+                tuple[
+                    CameraControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
+        | None
+    ) = None,
     environment: Mapping[str, str] | None = None,
 ) -> Any:
     active_environment = (
@@ -180,6 +298,10 @@ def create_frame_source(
             width=width,
             height=height,
             fps=fps,
+            camera_controls=camera_controls,
+            camera_controls_reporter=(
+                camera_controls_reporter
+            ),
         )
 
     raise ControlledIlluminationPurePythonRunnerError(
@@ -283,6 +405,32 @@ def execute_pure_python_run(
         environment
     )
 
+    camera_control_profile = (
+        load_camera_control_profile(
+            experiment_config
+        )
+    )
+
+    camera_controls = (
+        create_camera_control_requests(
+            camera_control_profile
+        )
+    )
+
+    effective_camera_controls: tuple[
+        CameraControlResult,
+        ...,
+    ] = ()
+
+    def report_camera_controls(
+            results: tuple[
+                CameraControlResult,
+                ...,
+            ],
+    ) -> None:
+        nonlocal effective_camera_controls
+        effective_camera_controls = results
+
     quality_capture_config = (
         load_quality_capture_config(
             experiment_config,
@@ -320,6 +468,10 @@ def execute_pure_python_run(
         width=planned_run.resolution.width,
         height=planned_run.resolution.height,
         fps=realtime_config.target_fps,
+        camera_controls=camera_controls,
+        camera_controls_reporter=(
+            report_camera_controls
+        ),
         environment=environment,
     )
 
@@ -339,6 +491,12 @@ def execute_pure_python_run(
             if quality_capture_config.enabled
             else None
         ),
+    )
+
+    camera_controls_metadata = (
+        camera_control_results_to_metadata(
+            effective_camera_controls
+        )
     )
 
     if (
@@ -380,6 +538,9 @@ def execute_pure_python_run(
                 finished_at_utc=finished_at_utc,
                 warmup_frame_count=(
                     realtime_config.warmup_frames
+                ),
+                camera_controls=(
+                    camera_controls_metadata
                 ),
             )
         )

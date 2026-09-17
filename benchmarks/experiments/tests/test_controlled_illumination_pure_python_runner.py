@@ -6,7 +6,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock,patch
+from unittest.mock import ANY,Mock,patch
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
@@ -14,6 +14,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
 from benchmarks.experiments.controlled_illumination_pure_python_runner import (
     ControlledIlluminationPurePythonRunnerError,
     execute_pure_python_run,
+    load_camera_control_profile,
     run_cli,
     select_algorithm_configuration,
     validate_context_against_configuration,
@@ -31,6 +32,11 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
 from benchmarks.experiments import (
     controlled_illumination_pure_python_runner
     as pure_python_runner,
+)
+
+from benchmarks.realtime.camera_controls import (
+    CameraControlError,
+    CameraControlRequest,
 )
 
 RUNNER_MODULE = (
@@ -348,6 +354,8 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
+            camera_controls=(),
+            camera_controls_reporter=ANY,
             environment=environment,
         )
         run_trial.assert_called_once_with(
@@ -367,6 +375,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             started_at_utc=STARTED_AT,
             finished_at_utc=FINISHED_AT,
             warmup_frame_count=30,
+            camera_controls={},
         )
         write_quality_artifacts.assert_not_called()
 
@@ -539,6 +548,8 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
+            camera_controls=(),
+            camera_controls_reporter=None,
         )
         resolve_video.assert_not_called()
         iter_video.assert_not_called()
@@ -1071,6 +1082,366 @@ class ControlledIlluminationPurePythonRunnerTests(
 
         cleanup_quality.assert_called_once_with(
             self.context.output_directory
+        )
+
+    def test_required_camera_control_failure_does_not_write_artifacts(
+            self,
+    ) -> None:
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "0",
+        }
+
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=30,
+            measured_frames=500,
+        )
+
+        quality_config = QualityCaptureConfig(
+            enabled=False,
+            measured_frame_indices=(),
+            image_format="png",
+        )
+
+        algorithm_config = {
+            "name": "gamma_correction",
+            "parameters": {
+                "gamma_value": 0.6,
+            },
+        }
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_experiment_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_quality_capture_config",
+                return_value=quality_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value=algorithm_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                side_effect=CameraControlError(
+                    "Required camera control failed."
+                ),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+            ) as write_artifacts,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+            ) as write_quality_artifacts,
+        ):
+            with self.assertRaisesRegex(
+                    CameraControlError,
+                    "Required camera control failed",
+            ):
+                execute_pure_python_run(
+                    environment,
+                    now_provider=lambda: STARTED_AT,
+                )
+
+        write_artifacts.assert_not_called()
+        write_quality_artifacts.assert_not_called()
+
+    def test_camera_input_forwards_camera_controls(
+            self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+        frame_source = object()
+
+        camera_controls = (
+            CameraControlRequest(
+                name="auto_exposure",
+                property_id=21,
+                requested_value=0.25,
+            ),
+            CameraControlRequest(
+                name="exposure",
+                property_id=15,
+                requested_value=-6.0,
+            ),
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+                return_value=frame_source,
+            ) as iter_camera,
+            patch(
+                f"{RUNNER_MODULE}."
+                "resolve_video_path",
+            ) as resolve_video,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_video_frames",
+            ) as iter_video,
+        ):
+            selected_source = (
+                pure_python_runner
+                .create_frame_source(
+                    benchmark_config,
+                    width=640,
+                    height=480,
+                    fps=30.0,
+                    camera_controls=(
+                        camera_controls
+                    ),
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": (
+                            "camera"
+                        ),
+                        "VISIONLAB_CAMERA_INDEX": "2",
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_camera.assert_called_once_with(
+            2,
+            width=640,
+            height=480,
+            fps=30.0,
+            camera_controls=camera_controls,
+            camera_controls_reporter=None,
+        )
+
+        resolve_video.assert_not_called()
+        iter_video.assert_not_called()
+
+    def test_missing_camera_control_profile_returns_empty_profile(
+            self,
+    ) -> None:
+        profile = load_camera_control_profile(
+            {}
+        )
+
+        self.assertIsNone(
+            profile.auto_exposure
+        )
+        self.assertIsNone(
+            profile.exposure
+        )
+        self.assertIsNone(
+            profile.gain
+        )
+        self.assertIsNone(
+            profile.auto_white_balance
+        )
+        self.assertIsNone(
+            profile.white_balance_temperature
+        )
+        self.assertIsNone(
+            profile.autofocus
+        )
+        self.assertIsNone(
+            profile.focus
+        )
+
+    def test_camera_control_profile_is_loaded(
+            self,
+    ) -> None:
+        profile = load_camera_control_profile(
+            {
+                "camera_control_profile": {
+                    "auto_exposure": 0.25,
+                    "exposure": -6.0,
+                    "gain": 1.0,
+                    "auto_white_balance": 0.0,
+                    "white_balance_temperature": 4500.0,
+                    "autofocus": 0.0,
+                    "focus": 20.0,
+                }
+            }
+        )
+
+        self.assertEqual(
+            profile.auto_exposure,
+            0.25,
+        )
+        self.assertEqual(
+            profile.exposure,
+            -6.0,
+        )
+        self.assertEqual(
+            profile.gain,
+            1.0,
+        )
+        self.assertEqual(
+            profile.auto_white_balance,
+            0.0,
+        )
+        self.assertEqual(
+            profile.white_balance_temperature,
+            4500.0,
+        )
+        self.assertEqual(
+            profile.autofocus,
+            0.0,
+        )
+        self.assertEqual(
+            profile.focus,
+            20.0,
+        )
+
+    def test_camera_control_profile_must_be_object(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "camera_control_profile must be an object",
+        ):
+            load_camera_control_profile(
+                {
+                    "camera_control_profile": [
+                        "exposure"
+                    ]
+                }
+            )
+
+    def test_unknown_camera_control_profile_field_is_rejected(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "Unsupported camera control profile fields",
+        ):
+            load_camera_control_profile(
+                {
+                    "camera_control_profile": {
+                        "unknown_control": 1.0,
+                    }
+                }
+            )
+
+    def test_manual_camera_control_requires_explicit_auto_mode(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "explicit auto_exposure",
+        ):
+            load_camera_control_profile(
+                {
+                    "camera_control_profile": {
+                        "exposure": -6.0,
+                    }
+                }
+            )
+
+    def test_camera_input_forwards_camera_controls_reporter(
+            self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+
+        frame_source = object()
+
+        camera_controls = (
+            CameraControlRequest(
+                name="exposure",
+                property_id=15,
+                requested_value=-6.0,
+            ),
+        )
+
+        reporter = Mock()
+
+        with patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+                return_value=frame_source,
+        ) as iter_camera:
+            selected_source = (
+                pure_python_runner
+                .create_frame_source(
+                    benchmark_config,
+                    width=640,
+                    height=480,
+                    fps=30.0,
+                    camera_controls=(
+                        camera_controls
+                    ),
+                    camera_controls_reporter=(
+                        reporter
+                    ),
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": (
+                            "camera"
+                        ),
+                        "VISIONLAB_CAMERA_INDEX": "2",
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_camera.assert_called_once_with(
+            2,
+            width=640,
+            height=480,
+            fps=30.0,
+            camera_controls=(
+                camera_controls
+            ),
+            camera_controls_reporter=(
+                reporter
+            ),
         )
 
 if __name__ == "__main__":

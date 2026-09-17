@@ -406,6 +406,10 @@ class ControlledIlluminationRunArtifactTests(
                 ),
             )
             self.assertEqual(
+                summary["camera_controls"],
+                {},
+            )
+            self.assertEqual(
                 list(
                     context.output_directory.glob(
                         ".*.tmp"
@@ -483,6 +487,49 @@ class ControlledIlluminationRunArtifactTests(
                     warmup_frame_count=-1,
                 )
 
+    def test_completed_artifacts_include_camera_controls(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            context = self.create_context(
+                Path(temporary)
+            )
+            records = self.create_records()
+
+            camera_controls = {
+                "exposure": {
+                    "property_id": 15,
+                    "requested": -6.0,
+                    "effective": -6.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            _, summary_path = (
+                write_completed_run_artifacts_atomic(
+                    context,
+                    records,
+                    started_at_utc=STARTED_AT,
+                    finished_at_utc=FINISHED_AT,
+                    warmup_frame_count=30,
+                    camera_controls=camera_controls,
+                )
+            )
+
+            with summary_path.open(
+                    "r",
+                    encoding="utf-8",
+            ) as summary_file:
+                summary = json.load(
+                    summary_file
+                )
+
+            self.assertEqual(
+                summary["camera_controls"],
+                camera_controls,
+            )
 
 if __name__ == "__main__":
     unittest.main()

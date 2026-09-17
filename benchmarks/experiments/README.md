@@ -33,6 +33,7 @@ The infrastructure in this directory does not perform the physical experiment au
 | `tests/test_controlled_illumination_run_bundle.py` | Tests bundle models, artifact integrity, cross-file consistency and atomic finalization. |
 | `tests/test_finalize_controlled_illumination_run_bundle.py` | Tests finalization CLI selection and orchestration behavior. |
 | `config/controlled_illumination_optical_screening.json` | Defines the 300-run desktop optical-screening profile for the `constant_lux` phase. |
+| `controlled_illumination_physical_pilot_checklist.md` | Defines the hardware preflight, camera-control verification and pilot acceptance gate required before full optical-screening collection. |
 
 ## Experiment phases
 
@@ -282,6 +283,18 @@ The tests cover:
 * CLI failure behavior
 
 All tests must pass before publishing changes or collecting official experiment results.
+
+## Physical pilot gate
+
+Before collecting the full optical-screening dataset, complete:
+
+```text
+benchmarks/experiments/controlled_illumination_physical_pilot_checklist.md
+```
+
+The full 300-run dataset must not begin until the camera preflight,
+required-control verification, pilot execution and finalized metadata
+checks in that checklist have passed.
 
 ## Official experiment workflow
 

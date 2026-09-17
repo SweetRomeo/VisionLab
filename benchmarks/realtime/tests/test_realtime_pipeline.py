@@ -18,7 +18,10 @@ from benchmarks.realtime.realtime_pipeline import (
 from benchmarks.realtime.realtime_records import (
     FrameStatus,
 )
-
+from benchmarks.realtime.camera_controls import (
+    CameraControlError,
+    CameraControlRequest,
+)
 
 class RealtimePipelineTests(unittest.TestCase):
     def create_config(
@@ -1348,6 +1351,161 @@ class RealtimePipelineTests(unittest.TestCase):
             29.97,
         )
         capture.release.assert_called_once_with()
+
+    def test_camera_controls_are_applied_before_frame_read(
+            self,
+    ) -> None:
+        expected_frame = self.create_frames(
+            1
+        )[0]
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.set.return_value = True
+        capture.get.return_value = 42.0
+        capture.read.return_value = (
+            True,
+            expected_frame,
+        )
+
+        reported_results = []
+
+        def report_controls(
+                results,
+        ) -> None:
+            reported_results.extend(
+                results
+            )
+
+        request = CameraControlRequest(
+            name="exposure",
+            property_id=100,
+            requested_value=42.0,
+        )
+
+        with patch.object(
+                realtime_pipeline.cv2,
+                "VideoCapture",
+                return_value=capture,
+        ):
+            frame_iterator = (
+                realtime_pipeline
+                .iter_camera_frames(
+                    0,
+                    camera_controls=(
+                        request,
+                    ),
+                    camera_controls_reporter=(
+                        report_controls
+                    ),
+                )
+            )
+
+            try:
+                actual_frame = next(
+                    frame_iterator
+                )
+            finally:
+                frame_iterator.close()
+
+        self.assertIs(
+            actual_frame,
+            expected_frame,
+        )
+
+        capture.assert_has_calls(
+            [
+                call.isOpened(),
+                call.set(
+                    100,
+                    42.0,
+                ),
+                call.get(
+                    100,
+                ),
+                call.read(),
+            ]
+        )
+
+        self.assertEqual(
+            len(reported_results),
+            1,
+        )
+
+        self.assertEqual(
+            reported_results[0].name,
+            "exposure",
+        )
+        self.assertTrue(
+            reported_results[0]
+            .matches_requested
+        )
+
+        capture.release.assert_called_once_with()
+
+    def test_camera_control_failure_releases_camera_before_read(
+            self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.set.return_value = False
+
+        request = CameraControlRequest(
+            name="exposure",
+            property_id=100,
+            requested_value=42.0,
+        )
+
+        with patch.object(
+                realtime_pipeline.cv2,
+                "VideoCapture",
+                return_value=capture,
+        ):
+            frame_iterator = (
+                realtime_pipeline
+                .iter_camera_frames(
+                    0,
+                    camera_controls=(
+                        request,
+                    ),
+                )
+            )
+
+            with self.assertRaisesRegex(
+                    CameraControlError,
+                    "could not be applied",
+            ):
+                next(
+                    frame_iterator
+                )
+
+        capture.read.assert_not_called()
+        capture.release.assert_called_once_with()
+
+    def test_invalid_camera_controls_reporter_is_rejected_before_open(
+            self,
+    ) -> None:
+        with patch.object(
+                realtime_pipeline.cv2,
+                "VideoCapture",
+        ) as video_capture:
+            frame_iterator = (
+                realtime_pipeline
+                .iter_camera_frames(
+                    0,
+                    camera_controls_reporter=123,
+                )
+            )
+
+            with self.assertRaisesRegex(
+                    TypeError,
+                    "camera_controls_reporter",
+            ):
+                next(
+                    frame_iterator
+                )
+
+        video_capture.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

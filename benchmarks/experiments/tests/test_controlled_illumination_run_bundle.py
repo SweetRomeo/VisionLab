@@ -34,6 +34,7 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     load_controlled_illumination_config,
+    load_run_metadata,
     save_run_metadata_atomic,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
@@ -124,7 +125,7 @@ class ControlledIlluminationRunBundleTests(
         return file_contents
 
     def create_execution_summary_value(
-        self,
+            self,
     ) -> dict:
         return {
             "schema_version": 1,
@@ -156,6 +157,7 @@ class ControlledIlluminationRunBundleTests(
             "deadline_miss_count": 1,
             "mean_processing_time_ms": 5.0,
             "mean_end_to_end_latency_ms": 7.0,
+            "camera_controls": {},
             "frame_results_file": (
                 FRAME_RESULTS_FILE_NAME
             ),
@@ -208,9 +210,10 @@ class ControlledIlluminationRunBundleTests(
         summary_value = (
             self.create_execution_summary_value()
         )
-        measured_frames = config["execution"][
-            "measured_frames"
-        ]
+
+        measured_frames = config[
+            "execution"
+        ]["measured_frames"]
 
         summary_value.update(
             {
@@ -255,6 +258,7 @@ class ControlledIlluminationRunBundleTests(
                     measured_frames
                 ),
                 "deadline_miss_count": 0,
+                "camera_controls": {},
                 "frame_results_sha256": (
                     frame_hash
                 ),
@@ -1263,6 +1267,227 @@ class ControlledIlluminationRunBundleTests(
             manifest.metadata_dry_run,
             metadata.dry_run,
         )
+
+    def test_finalization_synchronizes_camera_controls_into_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            camera_controls = {
+                "exposure": {
+                    "property_id": 15,
+                    "requested": -6.0,
+                    "effective": -6.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value["camera_controls"] = (
+                camera_controls
+            )
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            finalize_run_bundle_atomic(
+                run_directory,
+                planned_run,
+                config,
+                VALID_PLAN_SHA256,
+                "2026-08-26T11:00:00Z",
+            )
+
+            updated_metadata = load_run_metadata(
+                run_directory
+                / RUN_METADATA_FILE_NAME,
+                config=config,
+            )
+
+            self.assertEqual(
+                updated_metadata.camera_settings[
+                    "controls"
+                ],
+                camera_controls,
+            )
+
+    def test_manifest_hash_includes_synchronized_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value["camera_controls"] = {
+                "gain": {
+                    "property_id": 14,
+                    "requested": 2.0,
+                    "effective": 2.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            manifest, _ = (
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T11:00:00Z",
+                )
+            )
+
+            metadata_path = (
+                    run_directory
+                    / RUN_METADATA_FILE_NAME
+            )
+
+            expected_metadata_hash = (
+                hashlib.sha256(
+                    metadata_path.read_bytes()
+                ).hexdigest()
+            )
+
+            metadata_artifact = next(
+                artifact
+                for artifact in manifest.artifacts
+                if artifact.file_name
+                == RUN_METADATA_FILE_NAME
+            )
+
+            self.assertEqual(
+                metadata_artifact.sha256,
+                expected_metadata_hash,
+            )
+
+    def test_failed_finalization_does_not_modify_run_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value["camera_controls"] = {
+                "exposure": {
+                    "property_id": 15,
+                    "requested": -6.0,
+                    "effective": -6.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            metadata_path = (
+                    run_directory
+                    / RUN_METADATA_FILE_NAME
+            )
+
+            original_metadata = (
+                metadata_path.read_bytes()
+            )
+
+            frame_results_path.write_bytes(
+                b"modified frame results\n"
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "SHA-256",
+            ):
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T11:00:00Z",
+                )
+
+            self.assertEqual(
+                metadata_path.read_bytes(),
+                original_metadata,
+            )
+
+            self.assertFalse(
+                (
+                        run_directory
+                        / RUN_BUNDLE_MANIFEST_FILE_NAME
+                ).exists()
+            )
 
     def test_modified_frame_results_are_rejected(
         self,

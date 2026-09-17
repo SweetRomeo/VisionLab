@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import ANY, MagicMock, patch
 from contextlib import (
@@ -11,6 +14,10 @@ from benchmarks.experiments import (
     as camera_preflight,
 )
 
+from benchmarks.realtime.camera_controls import (
+    CameraControlRequest,
+    CameraControlResult,
+)
 
 PREFLIGHT_MODULE = (
     "benchmarks.experiments."
@@ -32,8 +39,8 @@ class ControlledIlluminationCameraPreflightTests(
         )
 
         def create_frame_source(
-            camera_index: int,
-            **arguments,
+                camera_index: int,
+                **arguments,
         ):
             arguments[
                 "capture_mode_reporter"
@@ -42,6 +49,23 @@ class ControlledIlluminationCameraPreflightTests(
                 12,
                 29.97,
             )
+
+            arguments[
+                "camera_controls_reporter"
+            ](
+                (
+                    CameraControlResult(
+                        name="exposure",
+                        property_id=15,
+                        requested_value=-6.0,
+                        applied=True,
+                        effective_value=-6.0,
+                        verified=True,
+                        matches_requested=True,
+                    ),
+                )
+            )
+
             return frame_source
 
         with patch(
@@ -74,7 +98,9 @@ class ControlledIlluminationCameraPreflightTests(
             width=16,
             height=12,
             fps=30.0,
+            camera_controls=ANY,
             capture_mode_reporter=ANY,
+            camera_controls_reporter=ANY,
         )
         self.assertEqual(
             frame_source.__next__.call_count,
@@ -133,6 +159,17 @@ class ControlledIlluminationCameraPreflightTests(
                 effective_height=12,
                 effective_fps=29.97,
                 sampled_frame_count=3,
+                camera_controls=(
+                    CameraControlResult(
+                        name="exposure",
+                        property_id=15,
+                        requested_value=-6.0,
+                        applied=True,
+                        effective_value=-6.0,
+                        verified=True,
+                        matches_requested=True,
+                    ),
+                ),
             )
         )
         captured_output = StringIO()
@@ -167,6 +204,7 @@ class ControlledIlluminationCameraPreflightTests(
             height=12,
             fps=30.0,
             sample_frames=3,
+            camera_controls=(),
         )
 
         output = captured_output.getvalue()
@@ -275,6 +313,127 @@ class ControlledIlluminationCameraPreflightTests(
                 )
 
         frame_source.close.assert_called_once_with()
+
+    def test_successful_preflight_writes_no_experiment_artifacts(
+            self,
+    ) -> None:
+        frame_source = MagicMock()
+        frame_source.__next__.return_value = object()
+
+        def create_frame_source(
+                camera_index: int,
+                **arguments,
+        ):
+            arguments["capture_mode_reporter"](
+                16,
+                12,
+                30.0,
+            )
+            arguments["camera_controls_reporter"](
+                ()
+            )
+            return frame_source
+
+        with TemporaryDirectory() as temporary:
+            original_directory = os.getcwd()
+
+            try:
+                os.chdir(temporary)
+
+                with patch(
+                        f"{PREFLIGHT_MODULE}."
+                        "iter_camera_frames",
+                        side_effect=create_frame_source,
+                ):
+                    camera_preflight.run_camera_preflight(
+                        camera_index=0,
+                        width=16,
+                        height=12,
+                        fps=30.0,
+                        sample_frames=1,
+                    )
+
+                self.assertEqual(
+                    list(Path(temporary).iterdir()),
+                    [],
+                )
+            finally:
+                os.chdir(original_directory)
+
+    def test_failed_preflight_writes_no_experiment_artifacts(
+            self,
+    ) -> None:
+        frame_source = MagicMock()
+        frame_source.__next__.side_effect = RuntimeError(
+            "camera read failure"
+        )
+
+        with TemporaryDirectory() as temporary:
+            original_directory = os.getcwd()
+
+            try:
+                os.chdir(temporary)
+
+                with patch(
+                        f"{PREFLIGHT_MODULE}."
+                        "iter_camera_frames",
+                        return_value=frame_source,
+                ):
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            "camera read failure",
+                    ):
+                        camera_preflight.run_camera_preflight(
+                            camera_index=0,
+                            width=16,
+                            height=12,
+                            fps=30.0,
+                            sample_frames=1,
+                        )
+
+                self.assertEqual(
+                    list(Path(temporary).iterdir()),
+                    [],
+                )
+            finally:
+                os.chdir(original_directory)
+
+    def test_cli_rejects_manual_exposure_without_auto_exposure(
+            self,
+    ) -> None:
+        captured_error = StringIO()
+
+        with redirect_stderr(
+                captured_error
+        ):
+            exit_code = (
+                camera_preflight.run_cli(
+                    [
+                        "--camera-index",
+                        "0",
+                        "--width",
+                        "16",
+                        "--height",
+                        "12",
+                        "--fps",
+                        "30",
+                        "--sample-frames",
+                        "1",
+                        "--exposure",
+                        "-6",
+                    ]
+                )
+            )
+
+        self.assertEqual(
+            exit_code,
+            1,
+        )
+
+        self.assertIn(
+            "explicit auto_exposure",
+            captured_error.getvalue(),
+        )
 
 if __name__ == "__main__":
     unittest.main()

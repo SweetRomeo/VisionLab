@@ -7,6 +7,12 @@ from dataclasses import dataclass
 from benchmarks.realtime.realtime_pipeline import (
     iter_camera_frames,
 )
+from benchmarks.realtime.camera_controls import (
+    CameraControlProfile,
+    CameraControlRequest,
+    CameraControlResult,
+    create_camera_control_requests,
+)
 
 
 @dataclass(frozen=True)
@@ -16,6 +22,10 @@ class CameraPreflightResult:
     effective_height: int
     effective_fps: float
     sampled_frame_count: int
+    camera_controls: tuple[
+        CameraControlResult,
+        ...,
+    ]
 
 
 def run_camera_preflight(
@@ -25,6 +35,10 @@ def run_camera_preflight(
     height: int,
     fps: float,
     sample_frames: int,
+    camera_controls: tuple[
+        CameraControlRequest,
+        ...,
+    ] = (),
 ) -> CameraPreflightResult:
     if (
         isinstance(sample_frames, bool)
@@ -40,25 +54,45 @@ def run_camera_preflight(
         tuple[int, int, float] | None
     ) = None
 
+    effective_camera_controls: tuple[
+        CameraControlResult,
+        ...,
+    ] = ()
+
     def report_capture_mode(
         effective_width: int,
         effective_height: int,
         effective_fps: float,
     ) -> None:
         nonlocal effective_mode
+
         effective_mode = (
             effective_width,
             effective_height,
             effective_fps,
         )
 
+    def report_camera_controls(
+        results: tuple[
+            CameraControlResult,
+            ...,
+        ],
+    ) -> None:
+        nonlocal effective_camera_controls
+
+        effective_camera_controls = results
+
     frame_source = iter_camera_frames(
         camera_index,
         width=width,
         height=height,
         fps=fps,
+        camera_controls=camera_controls,
         capture_mode_reporter=(
             report_capture_mode
+        ),
+        camera_controls_reporter=(
+            report_camera_controls
         ),
     )
 
@@ -89,6 +123,9 @@ def run_camera_preflight(
         effective_fps=effective_fps,
         sampled_frame_count=(
             sampled_frame_count
+        ),
+        camera_controls=(
+            effective_camera_controls
         ),
     )
 
@@ -127,6 +164,40 @@ def create_argument_parser() -> (
         type=int,
         required=True,
     )
+    parser.add_argument(
+        "--auto-exposure",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--exposure",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--gain",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--auto-white-balance",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--white-balance-temperature",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--autofocus",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--focus",
+        type=float,
+    )
 
     return parser
 
@@ -135,11 +206,46 @@ def run_cli(
     arguments: list[str] | None = None,
 ) -> int:
     parser = create_argument_parser()
+
     parsed_arguments = parser.parse_args(
         arguments
     )
 
     try:
+        camera_control_profile = (
+            CameraControlProfile(
+                auto_exposure=(
+                    parsed_arguments.auto_exposure
+                ),
+                exposure=(
+                    parsed_arguments.exposure
+                ),
+                gain=(
+                    parsed_arguments.gain
+                ),
+                auto_white_balance=(
+                    parsed_arguments
+                    .auto_white_balance
+                ),
+                white_balance_temperature=(
+                    parsed_arguments
+                    .white_balance_temperature
+                ),
+                autofocus=(
+                    parsed_arguments.autofocus
+                ),
+                focus=(
+                    parsed_arguments.focus
+                ),
+            )
+        )
+
+        camera_controls = (
+            create_camera_control_requests(
+                camera_control_profile
+            )
+        )
+
         result = run_camera_preflight(
             camera_index=(
                 parsed_arguments.camera_index
@@ -150,7 +256,11 @@ def run_cli(
             sample_frames=(
                 parsed_arguments.sample_frames
             ),
+            camera_controls=(
+                camera_controls
+            ),
         )
+
     except Exception as error:
         print(
             f"Camera preflight failed: {error}",
@@ -175,6 +285,30 @@ def run_cli(
         "Sampled frames: "
         f"{result.sampled_frame_count}"
     )
+    if result.camera_controls:
+        print("Camera controls:")
+
+        for control in result.camera_controls:
+            effective = (
+                "unavailable"
+                if control.effective_value is None
+                else str(
+                    control.effective_value
+                )
+            )
+
+            print(
+                f"  {control.name}: "
+                f"requested="
+                f"{control.requested_value}, "
+                f"effective={effective}, "
+                f"applied={control.applied}, "
+                f"verified={control.verified}"
+            )
+    else:
+        print(
+            "Camera controls: none requested."
+        )
     print(
         "No experiment artifacts were written."
     )

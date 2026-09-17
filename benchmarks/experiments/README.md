@@ -292,6 +292,10 @@ Before collecting the full optical-screening dataset, complete:
 benchmarks/experiments/controlled_illumination_physical_pilot_checklist.md
 ```
 
+The full 300-run dataset must not begin until the camera preflight,
+required-control verification, pilot execution and finalized metadata
+checks in that checklist have passed.
+
 ## Official experiment workflow
 
 For each official experiment run:

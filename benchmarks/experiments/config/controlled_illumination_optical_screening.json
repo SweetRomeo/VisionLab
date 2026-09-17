@@ -71,6 +71,15 @@
     ],
     "image_format": "png"
   },
+    "camera_control_profile": {
+    "auto_exposure": null,
+    "exposure": null,
+    "gain": null,
+    "auto_white_balance": null,
+    "white_balance_temperature": null,
+    "autofocus": null,
+    "focus": null
+  },
   "illuminance_measurement": {
     "unit": "lux",
     "positions": [

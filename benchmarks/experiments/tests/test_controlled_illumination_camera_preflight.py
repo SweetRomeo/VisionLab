@@ -159,14 +159,16 @@ class ControlledIlluminationCameraPreflightTests(
     ) -> None:
         result = (
             camera_preflight.CameraPreflightResult(
+                platform="desktop",
                 camera_backend="opencv",
                 camera_index=0,
+                camera_model=None,
                 effective_width=16,
                 effective_height=12,
                 effective_fps=29.97,
-                sampled_frame_count=3,
+                sampled_frame_count=30,
                 camera_controls=(
-                    CameraControlResult(
+                    camera_preflight.CameraControlResult(
                         name="exposure",
                         property_id=15,
                         requested_value=-6.0,
@@ -589,6 +591,7 @@ class ControlledIlluminationCameraPreflightTests(
             control_profile=profile,
             control_reporter=ANY,
             capture_mode_reporter=ANY,
+            camera_model_reporter=ANY,
         )
 
         iter_camera.assert_not_called()
@@ -627,12 +630,14 @@ class ControlledIlluminationCameraPreflightTests(
     ) -> None:
         result = (
             camera_preflight.CameraPreflightResult(
+                platform="raspberry_pi",
                 camera_backend="picamera2",
                 camera_index=0,
-                effective_width=16,
-                effective_height=12,
+                camera_model="imx708",
+                effective_width=1280,
+                effective_height=720,
                 effective_fps=30.0,
-                sampled_frame_count=1,
+                sampled_frame_count=30,
                 camera_controls=(),
             )
         )
@@ -682,12 +687,14 @@ class ControlledIlluminationCameraPreflightTests(
     ) -> None:
         result = (
             camera_preflight.CameraPreflightResult(
+                platform="raspberry_pi",
                 camera_backend="picamera2",
                 camera_index=0,
-                effective_width=16,
-                effective_height=12,
+                camera_model="imx708",
+                effective_width=1280,
+                effective_height=720,
                 effective_fps=30.0,
-                sampled_frame_count=1,
+                sampled_frame_count=30,
                 camera_controls=(),
             )
         )

@@ -22,13 +22,20 @@ from benchmarks.realtime.picamera2_controls import (
     validate_picamera2_control_profile,
 )
 
+
 OPENCV_CAMERA_BACKEND = "opencv"
 PICAMERA2_CAMERA_BACKEND = "picamera2"
 
+DESKTOP_PLATFORM = "desktop"
+RASPBERRY_PI_PLATFORM = "raspberry_pi"
+
+
 @dataclass(frozen=True)
 class CameraPreflightResult:
+    platform: str
     camera_backend: str
     camera_index: int
+    camera_model: str | None
     effective_width: int
     effective_height: int
     effective_fps: float
@@ -74,6 +81,8 @@ def run_camera_preflight(
         ...,
     ] = ()
 
+    camera_model: str | None = None
+
     def report_capture_mode(
         effective_width: int,
         effective_height: int,
@@ -88,16 +97,25 @@ def run_camera_preflight(
         )
 
     def report_camera_controls(
-            results: tuple[
-                CameraControlResult | Picamera2ControlResult,
-                ...,
-            ],
+        results: tuple[
+            CameraControlResult | Picamera2ControlResult,
+            ...,
+        ],
     ) -> None:
         nonlocal effective_camera_controls
 
         effective_camera_controls = results
 
+    def report_camera_model(
+        model: str | None,
+    ) -> None:
+        nonlocal camera_model
+
+        camera_model = model
+
     if camera_backend == OPENCV_CAMERA_BACKEND:
+        platform = DESKTOP_PLATFORM
+
         frame_source = iter_camera_frames(
             camera_index,
             width=width,
@@ -113,6 +131,8 @@ def run_camera_preflight(
         )
 
     elif camera_backend == PICAMERA2_CAMERA_BACKEND:
+        platform = RASPBERRY_PI_PLATFORM
+
         frame_source = iter_picamera2_frames(
             camera_index,
             width=width,
@@ -126,6 +146,9 @@ def run_camera_preflight(
             ),
             capture_mode_reporter=(
                 report_capture_mode
+            ),
+            camera_model_reporter=(
+                report_camera_model
             ),
         )
 
@@ -156,8 +179,10 @@ def run_camera_preflight(
     ) = effective_mode
 
     return CameraPreflightResult(
+        platform=platform,
         camera_backend=camera_backend,
         camera_index=camera_index,
+        camera_model=camera_model,
         effective_width=effective_width,
         effective_height=effective_height,
         effective_fps=effective_fps,
@@ -169,6 +194,7 @@ def run_camera_preflight(
         ),
     )
 
+
 def create_argument_parser() -> (
     argparse.ArgumentParser
 ):
@@ -178,6 +204,85 @@ def create_argument_parser() -> (
             "live-camera capture mode."
         )
     )
+
+    parser.add_argument(
+        "--camera-backend",
+        choices=(
+            OPENCV_CAMERA_BACKEND,
+            PICAMERA2_CAMERA_BACKEND,
+        ),
+        default=OPENCV_CAMERA_BACKEND,
+    )
+
+    parser.add_argument(
+        "--camera-index",
+        type=int,
+        required=True,
+    )
+
+    parser.add_argument(
+        "--width",
+        type=int,
+        required=True,
+    )
+
+    parser.add_argument(
+        "--height",
+        type=int,
+        required=True,
+    )
+
+    parser.add_argument(
+        "--fps",
+        type=float,
+        required=True,
+    )
+
+    parser.add_argument(
+        "--sample-frames",
+        type=int,
+        required=True,
+    )
+
+    # OpenCV camera controls.
+
+    parser.add_argument(
+        "--auto-exposure",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--exposure",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--gain",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--auto-white-balance",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--white-balance-temperature",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--autofocus",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--focus",
+        type=float,
+    )
+
+    # Picamera2 controls.
+
     parser.add_argument(
         "--ae-enable",
         type=lambda value: (
@@ -215,73 +320,6 @@ def create_argument_parser() -> (
         type=float,
         nargs=2,
     )
-    parser.add_argument(
-        "--camera-backend",
-        choices=(
-            OPENCV_CAMERA_BACKEND,
-            PICAMERA2_CAMERA_BACKEND,
-        ),
-        default=OPENCV_CAMERA_BACKEND,
-    )
-    parser.add_argument(
-        "--camera-index",
-        type=int,
-        required=True,
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        required=True,
-    )
-    parser.add_argument(
-        "--height",
-        type=int,
-        required=True,
-    )
-    parser.add_argument(
-        "--fps",
-        type=float,
-        required=True,
-    )
-    parser.add_argument(
-        "--sample-frames",
-        type=int,
-        required=True,
-    )
-    parser.add_argument(
-        "--auto-exposure",
-        type=float,
-    )
-
-    parser.add_argument(
-        "--exposure",
-        type=float,
-    )
-
-    parser.add_argument(
-        "--gain",
-        type=float,
-    )
-
-    parser.add_argument(
-        "--auto-white-balance",
-        type=float,
-    )
-
-    parser.add_argument(
-        "--white-balance-temperature",
-        type=float,
-    )
-
-    parser.add_argument(
-        "--autofocus",
-        type=float,
-    )
-
-    parser.add_argument(
-        "--focus",
-        type=float,
-    )
 
     return parser
 
@@ -296,40 +334,6 @@ def run_cli(
     )
 
     try:
-        camera_control_profile = (
-            CameraControlProfile(
-                auto_exposure=(
-                    parsed_arguments.auto_exposure
-                ),
-                exposure=(
-                    parsed_arguments.exposure
-                ),
-                gain=(
-                    parsed_arguments.gain
-                ),
-                auto_white_balance=(
-                    parsed_arguments
-                    .auto_white_balance
-                ),
-                white_balance_temperature=(
-                    parsed_arguments
-                    .white_balance_temperature
-                ),
-                autofocus=(
-                    parsed_arguments.autofocus
-                ),
-                focus=(
-                    parsed_arguments.focus
-                ),
-            )
-        )
-
-        camera_controls = (
-            create_camera_control_requests(
-                camera_control_profile
-            )
-        )
-
         camera_controls: tuple[
             CameraControlRequest,
             ...,
@@ -338,8 +342,8 @@ def run_cli(
         picamera2_control_profile = None
 
         if (
-                parsed_arguments.camera_backend
-                == OPENCV_CAMERA_BACKEND
+            parsed_arguments.camera_backend
+            == OPENCV_CAMERA_BACKEND
         ):
             camera_control_profile = (
                 CameraControlProfile(
@@ -378,7 +382,10 @@ def run_cli(
         else:
             colour_gains = None
 
-            if parsed_arguments.colour_gains is not None:
+            if (
+                parsed_arguments.colour_gains
+                is not None
+            ):
                 colour_gains = (
                     parsed_arguments.colour_gains[0],
                     parsed_arguments.colour_gains[1],
@@ -390,7 +397,8 @@ def run_cli(
                         parsed_arguments.ae_enable
                     ),
                     exposure_time_us=(
-                        parsed_arguments.exposure_time_us
+                        parsed_arguments
+                        .exposure_time_us
                     ),
                     analogue_gain=(
                         parsed_arguments.analogue_gain
@@ -435,26 +443,42 @@ def run_cli(
         return 1
 
     print("Camera preflight passed.")
+
+    print(
+        "Platform: "
+        f"{result.platform}"
+    )
+
     print(
         "Camera backend: "
         f"{result.camera_backend}"
     )
+
     print(
         f"Camera index: {result.camera_index}"
     )
+
+    print(
+        "Camera model: "
+        f"{result.camera_model or 'unavailable'}"
+    )
+
     print(
         "Effective resolution: "
         f"{result.effective_width}"
         f"x{result.effective_height}"
     )
+
     print(
         "Effective FPS: "
         f"{result.effective_fps:.2f}"
     )
+
     print(
         "Sampled frames: "
         f"{result.sampled_frame_count}"
     )
+
     if result.camera_controls:
         print("Camera controls:")
 
@@ -479,14 +503,17 @@ def run_cli(
         print(
             "Camera controls: none requested."
         )
+
     print(
         "No experiment artifacts were written."
     )
 
     return 0
 
+
 def main() -> None:
     raise SystemExit(run_cli())
+
 
 if __name__ == "__main__":
     main()

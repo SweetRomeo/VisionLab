@@ -96,6 +96,9 @@ def iter_picamera2_frames(
     picamera2_factory: (
         Callable[[int], Any] | None
     ) = None,
+    camera_model_reporter: (
+        Callable[[str | None], None] | None
+    ) = None,
 ) -> Iterator[np.ndarray]:
     _validate_camera_index(camera_index)
     _validate_capture_mode(
@@ -116,6 +119,22 @@ def iter_picamera2_frames(
     ):
         raise TypeError(
             "control_reporter must be callable."
+        )
+
+    if (
+            capture_mode_reporter is not None
+            and not callable(capture_mode_reporter)
+    ):
+        raise TypeError(
+            "capture_mode_reporter must be callable."
+        )
+
+    if (
+            camera_model_reporter is not None
+            and not callable(camera_model_reporter)
+    ):
+        raise TypeError(
+            "camera_model_reporter must be callable."
         )
 
     factory = (
@@ -151,6 +170,22 @@ def iter_picamera2_frames(
         )
 
         camera.configure(configuration)
+
+        if camera_model_reporter is not None:
+            camera_properties = camera.camera_properties
+
+            camera_model = None
+
+            if isinstance(camera_properties, dict):
+                model_value = camera_properties.get("Model")
+
+                if (
+                        isinstance(model_value, str)
+                        and model_value.strip()
+                ):
+                    camera_model = model_value.strip()
+
+            camera_model_reporter(camera_model)
 
         apply_picamera2_control_profile(
             camera,

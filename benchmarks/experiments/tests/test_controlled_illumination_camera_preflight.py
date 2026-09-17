@@ -11,6 +11,10 @@ from benchmarks.experiments import (
     as camera_preflight,
 )
 
+from benchmarks.realtime.camera_controls import (
+    CameraControlRequest,
+    CameraControlResult,
+)
 
 PREFLIGHT_MODULE = (
     "benchmarks.experiments."
@@ -32,8 +36,8 @@ class ControlledIlluminationCameraPreflightTests(
         )
 
         def create_frame_source(
-            camera_index: int,
-            **arguments,
+                camera_index: int,
+                **arguments,
         ):
             arguments[
                 "capture_mode_reporter"
@@ -42,6 +46,23 @@ class ControlledIlluminationCameraPreflightTests(
                 12,
                 29.97,
             )
+
+            arguments[
+                "camera_controls_reporter"
+            ](
+                (
+                    CameraControlResult(
+                        name="exposure",
+                        property_id=15,
+                        requested_value=-6.0,
+                        applied=True,
+                        effective_value=-6.0,
+                        verified=True,
+                        matches_requested=True,
+                    ),
+                )
+            )
+
             return frame_source
 
         with patch(
@@ -74,7 +95,9 @@ class ControlledIlluminationCameraPreflightTests(
             width=16,
             height=12,
             fps=30.0,
+            camera_controls=ANY,
             capture_mode_reporter=ANY,
+            camera_controls_reporter=ANY,
         )
         self.assertEqual(
             frame_source.__next__.call_count,
@@ -133,6 +156,17 @@ class ControlledIlluminationCameraPreflightTests(
                 effective_height=12,
                 effective_fps=29.97,
                 sampled_frame_count=3,
+                camera_controls=(
+                    CameraControlResult(
+                        name="exposure",
+                        property_id=15,
+                        requested_value=-6.0,
+                        applied=True,
+                        effective_value=-6.0,
+                        verified=True,
+                        matches_requested=True,
+                    ),
+                ),
             )
         )
         captured_output = StringIO()
@@ -167,6 +201,7 @@ class ControlledIlluminationCameraPreflightTests(
             height=12,
             fps=30.0,
             sample_frames=3,
+            camera_controls=(),
         )
 
         output = captured_output.getvalue()

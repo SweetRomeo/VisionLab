@@ -35,6 +35,7 @@ from benchmarks.experiments import (
 )
 
 from benchmarks.realtime.camera_controls import (
+    CameraControlError,
     CameraControlRequest,
 )
 
@@ -1082,6 +1083,110 @@ class ControlledIlluminationPurePythonRunnerTests(
         cleanup_quality.assert_called_once_with(
             self.context.output_directory
         )
+
+    def test_required_camera_control_failure_does_not_write_artifacts(
+            self,
+    ) -> None:
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "0",
+        }
+
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=30,
+            measured_frames=500,
+        )
+
+        quality_config = QualityCaptureConfig(
+            enabled=False,
+            measured_frame_indices=(),
+            image_format="png",
+        )
+
+        algorithm_config = {
+            "name": "gamma_correction",
+            "parameters": {
+                "gamma_value": 0.6,
+            },
+        }
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_experiment_config",
+                return_value={},
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_quality_capture_config",
+                return_value=quality_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value=algorithm_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                return_value=object(),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                side_effect=CameraControlError(
+                    "Required camera control failed."
+                ),
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+            ) as write_artifacts,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+            ) as write_quality_artifacts,
+        ):
+            with self.assertRaisesRegex(
+                    CameraControlError,
+                    "Required camera control failed",
+            ):
+                execute_pure_python_run(
+                    environment,
+                    now_provider=lambda: STARTED_AT,
+                )
+
+        write_artifacts.assert_not_called()
+        write_quality_artifacts.assert_not_called()
 
     def test_camera_input_forwards_camera_controls(
             self,

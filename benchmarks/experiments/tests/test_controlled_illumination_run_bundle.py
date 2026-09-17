@@ -124,7 +124,7 @@ class ControlledIlluminationRunBundleTests(
         return file_contents
 
     def create_execution_summary_value(
-        self,
+            self,
     ) -> dict:
         return {
             "schema_version": 1,
@@ -156,6 +156,7 @@ class ControlledIlluminationRunBundleTests(
             "deadline_miss_count": 1,
             "mean_processing_time_ms": 5.0,
             "mean_end_to_end_latency_ms": 7.0,
+            "camera_controls": {},
             "frame_results_file": (
                 FRAME_RESULTS_FILE_NAME
             ),
@@ -208,9 +209,10 @@ class ControlledIlluminationRunBundleTests(
         summary_value = (
             self.create_execution_summary_value()
         )
-        measured_frames = config["execution"][
-            "measured_frames"
-        ]
+
+        measured_frames = config[
+            "execution"
+        ]["measured_frames"]
 
         summary_value.update(
             {
@@ -255,6 +257,7 @@ class ControlledIlluminationRunBundleTests(
                     measured_frames
                 ),
                 "deadline_miss_count": 0,
+                "camera_controls": {},
                 "frame_results_sha256": (
                     frame_hash
                 ),

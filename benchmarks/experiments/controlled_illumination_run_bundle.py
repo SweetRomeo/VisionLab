@@ -16,6 +16,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     ResolutionMetadata,
     validate_safe_identifier,
     validate_utc_timestamp,
+    validate_camera_control_metadata,
     ControlledIlluminationRunMetadata,
     load_run_metadata,
 )
@@ -77,6 +78,7 @@ EXECUTION_SUMMARY_FIELDS = frozenset(
         "deadline_miss_count",
         "mean_processing_time_ms",
         "mean_end_to_end_latency_ms",
+        "camera_controls",
         "frame_results_file",
         "frame_results_sha256",
     }
@@ -1187,6 +1189,10 @@ class ControlledIlluminationExecutionSummary:
     deadline_miss_count: int
     mean_processing_time_ms: float | None
     mean_end_to_end_latency_ms: float | None
+    camera_controls: dict[
+        str,
+        dict[str, object],
+    ]
     frame_results_file: str
     frame_results_sha256: str
 
@@ -1339,6 +1345,20 @@ class ControlledIlluminationExecutionSummary:
                 "Mean timing values must be null when "
                 "no frames were processed."
             )
+
+        try:
+            validate_camera_control_metadata(
+                {
+                    "controls": (
+                        self.camera_controls
+                    )
+                }
+            )
+        except ValueError as error:
+            raise ControlledIlluminationRunBundleError(
+                "Invalid camera controls in "
+                f"execution summary: {error}"
+            ) from error
 
         if (
             self.frame_results_file

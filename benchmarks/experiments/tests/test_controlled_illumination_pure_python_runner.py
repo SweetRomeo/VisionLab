@@ -374,6 +374,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             started_at_utc=STARTED_AT,
             finished_at_utc=FINISHED_AT,
             warmup_frame_count=30,
+            camera_controls={},
         )
         write_quality_artifacts.assert_not_called()
 

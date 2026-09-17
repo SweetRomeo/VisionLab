@@ -46,8 +46,8 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
 )
 from benchmarks.realtime.camera_controls import (
     CameraControlProfile,
-    CameraControlRequest,
     CameraControlResult,
+    camera_control_results_to_metadata,
     create_camera_control_requests,
 )
 
@@ -492,6 +492,12 @@ def execute_pure_python_run(
         ),
     )
 
+    camera_controls_metadata = (
+        camera_control_results_to_metadata(
+            effective_camera_controls
+        )
+    )
+
     if (
             quality_capture_config.enabled
             and quality_capture_buffer.missing_indices
@@ -531,6 +537,9 @@ def execute_pure_python_run(
                 finished_at_utc=finished_at_utc,
                 warmup_frame_count=(
                     realtime_config.warmup_frames
+                ),
+                camera_controls=(
+                    camera_controls_metadata
                 ),
             )
         )

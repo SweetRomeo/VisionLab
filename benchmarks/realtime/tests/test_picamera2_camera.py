@@ -539,6 +539,89 @@ class Picamera2CameraTests(unittest.TestCase):
         camera.set_controls.assert_not_called()
         camera.capture_metadata.assert_not_called()
 
+    def test_effective_capture_mode_is_reported(
+            self,
+    ) -> None:
+        camera = self.create_camera()
+
+        camera.camera_configuration.return_value = {
+            "main": {
+                "size": (
+                    16,
+                    12,
+                ),
+            },
+        }
+
+        camera.capture_metadata.return_value = {
+            "FrameDuration": 40000,
+        }
+
+        camera.capture_array.return_value = (
+            np.zeros(
+                (12, 16, 3),
+                dtype=np.uint8,
+            )
+        )
+
+        reporter = MagicMock()
+
+        source = iter_picamera2_frames(
+            0,
+            width=16,
+            height=12,
+            fps=30.0,
+            capture_mode_reporter=reporter,
+            picamera2_factory=lambda _: camera,
+        )
+
+        next(source)
+        source.close()
+
+        reporter.assert_called_once_with(
+            16,
+            12,
+            25.0,
+        )
+
+        camera.capture_metadata.assert_called_once_with()
+        camera.camera_configuration.assert_called_once_with()
+
+    def test_invalid_effective_capture_mode_releases_camera(
+            self,
+    ) -> None:
+        camera = self.create_camera()
+
+        camera.camera_configuration.return_value = {
+            "main": {
+                "size": (
+                    16,
+                    12,
+                ),
+            },
+        }
+
+        camera.capture_metadata.return_value = {}
+
+        source = iter_picamera2_frames(
+            0,
+            width=16,
+            height=12,
+            fps=30.0,
+            capture_mode_reporter=MagicMock(),
+            picamera2_factory=lambda _: camera,
+        )
+
+        with self.assertRaisesRegex(
+                Picamera2CameraError,
+                "effective capture mode",
+        ):
+            next(source)
+
+        camera.stop.assert_called_once_with()
+        camera.close.assert_called_once_with()
+        camera.capture_array.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

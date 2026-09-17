@@ -89,6 +89,10 @@ def iter_picamera2_frames(
         ]
         | None
     ) = None,
+    capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
     picamera2_factory: (
         Callable[[int], Any] | None
     ) = None,
@@ -162,11 +166,77 @@ def iter_picamera2_frames(
             )
         )
 
-        if requested_controls:
+        effective_metadata = None
+
+        if (
+                requested_controls
+                or capture_mode_reporter is not None
+        ):
             effective_metadata = (
                 camera.capture_metadata()
             )
 
+        if capture_mode_reporter is not None:
+            effective_configuration = (
+                camera.camera_configuration()
+            )
+
+            try:
+                effective_size = (
+                    effective_configuration[
+                        "main"
+                    ]["size"]
+                )
+
+                effective_width = int(
+                    effective_size[0]
+                )
+                effective_height = int(
+                    effective_size[1]
+                )
+
+                frame_duration_us = (
+                    effective_metadata[
+                        "FrameDuration"
+                    ]
+                )
+
+                if (
+                        isinstance(frame_duration_us, bool)
+                        or not isinstance(
+                    frame_duration_us,
+                    (int, float),
+                )
+                        or not math.isfinite(
+                    float(frame_duration_us)
+                )
+                        or frame_duration_us <= 0
+                ):
+                    raise ValueError
+
+            except (
+                    KeyError,
+                    IndexError,
+                    TypeError,
+                    ValueError,
+            ) as error:
+                raise Picamera2CameraError(
+                    "Picamera2 effective capture mode "
+                    "could not be determined."
+                ) from error
+
+            effective_fps = (
+                    1_000_000.0
+                    / float(frame_duration_us)
+            )
+
+            capture_mode_reporter(
+                effective_width,
+                effective_height,
+                effective_fps,
+            )
+
+        if requested_controls:
             control_results = (
                 verify_picamera2_control_profile(
                     active_control_profile,

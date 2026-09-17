@@ -14,6 +14,7 @@ from benchmarks.experiments.controlled_illumination_metadata import (
 from benchmarks.experiments.controlled_illumination_pure_python_runner import (
     ControlledIlluminationPurePythonRunnerError,
     execute_pure_python_run,
+    load_camera_control_profile,
     run_cli,
     select_algorithm_configuration,
     validate_context_against_configuration,
@@ -352,6 +353,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
+            camera_controls=(),
             environment=environment,
         )
         run_trial.assert_called_once_with(
@@ -1150,6 +1152,126 @@ class ControlledIlluminationPurePythonRunnerTests(
 
         resolve_video.assert_not_called()
         iter_video.assert_not_called()
+
+    def test_missing_camera_control_profile_returns_empty_profile(
+            self,
+    ) -> None:
+        profile = load_camera_control_profile(
+            {}
+        )
+
+        self.assertIsNone(
+            profile.auto_exposure
+        )
+        self.assertIsNone(
+            profile.exposure
+        )
+        self.assertIsNone(
+            profile.gain
+        )
+        self.assertIsNone(
+            profile.auto_white_balance
+        )
+        self.assertIsNone(
+            profile.white_balance_temperature
+        )
+        self.assertIsNone(
+            profile.autofocus
+        )
+        self.assertIsNone(
+            profile.focus
+        )
+
+    def test_camera_control_profile_is_loaded(
+            self,
+    ) -> None:
+        profile = load_camera_control_profile(
+            {
+                "camera_control_profile": {
+                    "auto_exposure": 0.25,
+                    "exposure": -6.0,
+                    "gain": 1.0,
+                    "auto_white_balance": 0.0,
+                    "white_balance_temperature": 4500.0,
+                    "autofocus": 0.0,
+                    "focus": 20.0,
+                }
+            }
+        )
+
+        self.assertEqual(
+            profile.auto_exposure,
+            0.25,
+        )
+        self.assertEqual(
+            profile.exposure,
+            -6.0,
+        )
+        self.assertEqual(
+            profile.gain,
+            1.0,
+        )
+        self.assertEqual(
+            profile.auto_white_balance,
+            0.0,
+        )
+        self.assertEqual(
+            profile.white_balance_temperature,
+            4500.0,
+        )
+        self.assertEqual(
+            profile.autofocus,
+            0.0,
+        )
+        self.assertEqual(
+            profile.focus,
+            20.0,
+        )
+
+    def test_camera_control_profile_must_be_object(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "camera_control_profile must be an object",
+        ):
+            load_camera_control_profile(
+                {
+                    "camera_control_profile": [
+                        "exposure"
+                    ]
+                }
+            )
+
+    def test_unknown_camera_control_profile_field_is_rejected(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "Unsupported camera control profile fields",
+        ):
+            load_camera_control_profile(
+                {
+                    "camera_control_profile": {
+                        "unknown_control": 1.0,
+                    }
+                }
+            )
+
+    def test_manual_camera_control_requires_explicit_auto_mode(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "explicit auto_exposure",
+        ):
+            load_camera_control_profile(
+                {
+                    "camera_control_profile": {
+                        "exposure": -6.0,
+                    }
+                }
+            )
 
 if __name__ == "__main__":
     unittest.main()

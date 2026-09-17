@@ -1410,6 +1410,85 @@ class ControlledIlluminationRunBundleTests(
                 expected_metadata_hash,
             )
 
+    def test_failed_finalization_does_not_modify_run_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                frame_results_path,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value["camera_controls"] = {
+                "exposure": {
+                    "property_id": 15,
+                    "requested": -6.0,
+                    "effective": -6.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            metadata_path = (
+                    run_directory
+                    / RUN_METADATA_FILE_NAME
+            )
+
+            original_metadata = (
+                metadata_path.read_bytes()
+            )
+
+            frame_results_path.write_bytes(
+                b"modified frame results\n"
+            )
+
+            with self.assertRaisesRegex(
+                    ControlledIlluminationRunBundleError,
+                    "SHA-256",
+            ):
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T11:00:00Z",
+                )
+
+            self.assertEqual(
+                metadata_path.read_bytes(),
+                original_metadata,
+            )
+
+            self.assertFalse(
+                (
+                        run_directory
+                        / RUN_BUNDLE_MANIFEST_FILE_NAME
+                ).exists()
+            )
+
     def test_modified_frame_results_are_rejected(
         self,
     ) -> None:

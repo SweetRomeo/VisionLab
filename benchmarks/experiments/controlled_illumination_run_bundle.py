@@ -1838,11 +1838,24 @@ def finalize_run_bundle_atomic(
     ControlledIlluminationRunBundleManifest,
     Path,
 ]:
+    # Validate the existing bundle before mutating
+    # run metadata. A failed finalization must not
+    # partially synchronize camera controls.
+    validate_run_bundle(
+        run_directory,
+        planned_run,
+        config,
+        run_plan_sha256,
+        finalized_at_utc,
+    )
+
     synchronize_camera_controls_into_run_metadata(
         run_directory,
         config,
     )
 
+    # Validate again after synchronization so that
+    # the manifest hashes the final metadata bytes.
     manifest = validate_run_bundle(
         run_directory,
         planned_run,

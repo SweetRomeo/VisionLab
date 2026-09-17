@@ -311,5 +311,42 @@ class ControlledIlluminationCameraPreflightTests(
 
         frame_source.close.assert_called_once_with()
 
+    def test_cli_rejects_manual_exposure_without_auto_exposure(
+            self,
+    ) -> None:
+        captured_error = StringIO()
+
+        with redirect_stderr(
+                captured_error
+        ):
+            exit_code = (
+                camera_preflight.run_cli(
+                    [
+                        "--camera-index",
+                        "0",
+                        "--width",
+                        "16",
+                        "--height",
+                        "12",
+                        "--fps",
+                        "30",
+                        "--sample-frames",
+                        "1",
+                        "--exposure",
+                        "-6",
+                    ]
+                )
+            )
+
+        self.assertEqual(
+            exit_code,
+            1,
+        )
+
+        self.assertIn(
+            "explicit auto_exposure",
+            captured_error.getvalue(),
+        )
+
 if __name__ == "__main__":
     unittest.main()

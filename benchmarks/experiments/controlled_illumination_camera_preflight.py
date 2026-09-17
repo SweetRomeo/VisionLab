@@ -8,9 +8,10 @@ from benchmarks.realtime.realtime_pipeline import (
     iter_camera_frames,
 )
 from benchmarks.realtime.camera_controls import (
+    CameraControlProfile,
     CameraControlRequest,
     CameraControlResult,
-    create_opencv_camera_control_request,
+    create_camera_control_requests,
 )
 
 
@@ -205,50 +206,46 @@ def run_cli(
     arguments: list[str] | None = None,
 ) -> int:
     parser = create_argument_parser()
+
     parsed_arguments = parser.parse_args(
         arguments
     )
-    control_arguments = (
-        (
-            "auto_exposure",
-            parsed_arguments.auto_exposure,
-        ),
-        (
-            "exposure",
-            parsed_arguments.exposure,
-        ),
-        (
-            "gain",
-            parsed_arguments.gain,
-        ),
-        (
-            "auto_white_balance",
-            parsed_arguments.auto_white_balance,
-        ),
-        (
-            "white_balance_temperature",
-            parsed_arguments.white_balance_temperature,
-        ),
-        (
-            "autofocus",
-            parsed_arguments.autofocus,
-        ),
-        (
-            "focus",
-            parsed_arguments.focus,
-        ),
-    )
-
-    camera_controls = tuple(
-        create_opencv_camera_control_request(
-            name,
-            value,
-        )
-        for name, value in control_arguments
-        if value is not None
-    )
 
     try:
+        camera_control_profile = (
+            CameraControlProfile(
+                auto_exposure=(
+                    parsed_arguments.auto_exposure
+                ),
+                exposure=(
+                    parsed_arguments.exposure
+                ),
+                gain=(
+                    parsed_arguments.gain
+                ),
+                auto_white_balance=(
+                    parsed_arguments
+                    .auto_white_balance
+                ),
+                white_balance_temperature=(
+                    parsed_arguments
+                    .white_balance_temperature
+                ),
+                autofocus=(
+                    parsed_arguments.autofocus
+                ),
+                focus=(
+                    parsed_arguments.focus
+                ),
+            )
+        )
+
+        camera_controls = (
+            create_camera_control_requests(
+                camera_control_profile
+            )
+        )
+
         result = run_camera_preflight(
             camera_index=(
                 parsed_arguments.camera_index
@@ -259,8 +256,11 @@ def run_cli(
             sample_frames=(
                 parsed_arguments.sample_frames
             ),
-            camera_controls=camera_controls,
+            camera_controls=(
+                camera_controls
+            ),
         )
+
     except Exception as error:
         print(
             f"Camera preflight failed: {error}",

@@ -53,6 +53,14 @@ silently during a controlled-illumination run.
 The requested values must be based on the real camera/backend being
 used for the pilot.
 
+OpenCV camera-property behavior is backend and device dependent.
+A successful `VideoCapture.set()` call does not by itself prove that
+the requested physical camera state was established.
+
+Values used to disable automatic modes must therefore be validated on
+the actual camera/backend used for the pilot rather than assumed to be
+portable across devices.
+
 ## 3. Camera preflight
 
 Run the camera preflight before creating any completed experiment
@@ -87,6 +95,10 @@ The preflight must report:
 * Sampled frame count
 
 The preflight must not write completed experiment artifacts.
+
+Preflight success verifies camera configuration and acquisition
+behavior only. It does not replace physical geometry, lux or scene
+verification.
 
 ## 4. Preflight acceptance criteria
 
@@ -130,6 +142,9 @@ Before the pilot run:
 Do not change camera placement, focus, exposure, gain, white balance or
 scene geometry between pilot trials unless the pilot is intentionally
 testing that variable.
+
+Allow the lighting and camera conditions to stabilize before starting
+measured execution.
 
 ## 6. Pilot execution
 
@@ -189,6 +204,9 @@ matches_requested
 
 The values must reflect the actual runtime camera-control result.
 
+Requested values must not be treated as equivalent to effective values
+unless verification confirms the requested camera state.
+
 ## 9. Run-metadata verification
 
 Finalize the pilot run bundle using the normal controlled-illumination
@@ -226,14 +244,17 @@ Confirm that:
 * The run-bundle manifest hashes the final synchronized metadata file.
 * No temporary artifact files remain.
 
+Do not accept a pilot run whose finalized bundle fails integrity or
+cross-file validation.
+
 ## 11. Quality-capture verification
 
 After the physical pilot run:
 
-- Confirm that the configured quality-sample PNG files exist.
-- Confirm that `quality_samples_manifest.json` exists.
-- Verify that the recorded SHA-256 values match the captured files.
-- Confirm that all configured measured-frame sample indices are present.
+* Confirm that the configured quality-sample PNG files exist.
+* Confirm that `quality_samples_manifest.json` exists.
+* Verify that the recorded SHA-256 values match the captured files.
+* Confirm that all configured measured-frame sample indices are present.
 
 Do not accept the pilot if any required sample or hash is missing or
 inconsistent.
@@ -247,6 +268,29 @@ python -m benchmarks.experiments.analyze_controlled_illumination_quality \
   --results-directory <pilot-results-directory> \
   --output-directory <analysis-directory>
 ```
+
+Confirm that both outputs are created:
+
+```text
+optical_quality_samples.csv
+optical_quality_trial_summary.csv
+```
+
+Inspect the captured sample images manually for:
+
+* framing changes
+* clipping
+* unexpected blur
+* focus changes
+* unexpected exposure adjustment
+* unexpected white-balance adjustment
+
+The pilot must not be accepted when these checks indicate unintended
+automatic camera behaviour.
+
+The optical-quality analysis results are pilot-validation artifacts.
+They must not be interpreted as final thesis conclusions from the
+300-run optical-screening dataset.
 
 ## 13. Video-path regression
 
@@ -265,6 +309,15 @@ python -m unittest discover \
 -v
 ```
 
+Also run the real-time regression suite:
+
+```bash
+python -m unittest discover \
+-s benchmarks/realtime/tests \
+-p "test_*.py" \
+-v
+```
+
 ## 14. Pilot completion gate
 
 The full optical-screening dataset may begin only after the physical
@@ -278,13 +331,14 @@ pilot demonstrates all of the following:
 * Camera resources are released on all paths.
 * Requested/effective controls propagate into run metadata.
 * Finalized artifact hashes remain valid.
-* The video-input path remains unchanged.
-* The complete automated test suite passes.
-* Quality-sample PNGs and manifest hashes are valid. 
+* Quality-sample PNGs and manifest hashes are valid.
 * Optical-quality analysis completes successfully.
 * `optical_quality_samples.csv` is generated and inspected.
-* `optical_quality_trial_summary.csv` is generated and inspected. 
+* `optical_quality_trial_summary.csv` is generated and inspected.
 * Captured samples show no unexpected automatic camera adjustment.
+* The video-input path remains unchanged.
+* The complete controlled-illumination experiment test suite passes.
+* The complete real-time regression test suite passes.
 
 Only after these conditions are satisfied should the planned 300-run
 optical-screening dataset be collected.

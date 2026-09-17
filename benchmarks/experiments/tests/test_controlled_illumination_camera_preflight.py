@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import ANY, MagicMock, patch
 from contextlib import (
@@ -310,6 +313,90 @@ class ControlledIlluminationCameraPreflightTests(
                 )
 
         frame_source.close.assert_called_once_with()
+
+    def test_successful_preflight_writes_no_experiment_artifacts(
+            self,
+    ) -> None:
+        frame_source = MagicMock()
+        frame_source.__next__.return_value = object()
+
+        def create_frame_source(
+                camera_index: int,
+                **arguments,
+        ):
+            arguments["capture_mode_reporter"](
+                16,
+                12,
+                30.0,
+            )
+            arguments["camera_controls_reporter"](
+                ()
+            )
+            return frame_source
+
+        with TemporaryDirectory() as temporary:
+            original_directory = os.getcwd()
+
+            try:
+                os.chdir(temporary)
+
+                with patch(
+                        f"{PREFLIGHT_MODULE}."
+                        "iter_camera_frames",
+                        side_effect=create_frame_source,
+                ):
+                    camera_preflight.run_camera_preflight(
+                        camera_index=0,
+                        width=16,
+                        height=12,
+                        fps=30.0,
+                        sample_frames=1,
+                    )
+
+                self.assertEqual(
+                    list(Path(temporary).iterdir()),
+                    [],
+                )
+            finally:
+                os.chdir(original_directory)
+
+    def test_failed_preflight_writes_no_experiment_artifacts(
+            self,
+    ) -> None:
+        frame_source = MagicMock()
+        frame_source.__next__.side_effect = RuntimeError(
+            "camera read failure"
+        )
+
+        with TemporaryDirectory() as temporary:
+            original_directory = os.getcwd()
+
+            try:
+                os.chdir(temporary)
+
+                with patch(
+                        f"{PREFLIGHT_MODULE}."
+                        "iter_camera_frames",
+                        return_value=frame_source,
+                ):
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            "camera read failure",
+                    ):
+                        camera_preflight.run_camera_preflight(
+                            camera_index=0,
+                            width=16,
+                            height=12,
+                            fps=30.0,
+                            sample_frames=1,
+                        )
+
+                self.assertEqual(
+                    list(Path(temporary).iterdir()),
+                    [],
+                )
+            finally:
+                os.chdir(original_directory)
 
     def test_cli_rejects_manual_exposure_without_auto_exposure(
             self,

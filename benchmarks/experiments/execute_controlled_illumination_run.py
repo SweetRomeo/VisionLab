@@ -163,7 +163,7 @@ def build_planned_run_environment(
             "planned_run must be PlannedRun."
         )
 
-    return {
+    environment = {
         "VISIONLAB_EXPERIMENT_ID": (
             planned_run.experiment_id
         ),
@@ -206,6 +206,17 @@ def build_planned_run_environment(
             planned_run.frame_deadline_ms
         ),
     }
+
+    if planned_run.platform == "raspberry_pi":
+        environment[
+            "VISIONLAB_INPUT_SOURCE"
+        ] = "camera"
+
+        environment[
+            "VISIONLAB_CAMERA_BACKEND"
+        ] = "picamera2"
+
+    return environment
 
 
 def load_runner_registry(

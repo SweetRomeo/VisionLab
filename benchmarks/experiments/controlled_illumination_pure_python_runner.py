@@ -44,6 +44,9 @@ from benchmarks.experiments.controlled_illumination_quality_capture import (
     load_quality_capture_config,
     write_quality_capture_artifacts_atomic,
 )
+from benchmarks.realtime.camera_controls import (
+    CameraControlRequest,
+)
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -108,6 +111,10 @@ def create_frame_source(
     width: int | None = None,
     height: int | None = None,
     fps: float | None = None,
+    camera_controls: tuple[
+        CameraControlRequest,
+        ...,
+    ] = (),
     environment: Mapping[str, str] | None = None,
 ) -> Any:
     active_environment = (
@@ -180,6 +187,7 @@ def create_frame_source(
             width=width,
             height=height,
             fps=fps,
+            camera_controls=camera_controls,
         )
 
     raise ControlledIlluminationPurePythonRunnerError(

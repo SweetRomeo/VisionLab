@@ -33,6 +33,10 @@ from benchmarks.experiments import (
     as pure_python_runner,
 )
 
+from benchmarks.realtime.camera_controls import (
+    CameraControlRequest,
+)
+
 RUNNER_MODULE = (
     "benchmarks.experiments."
     "controlled_illumination_pure_python_runner"
@@ -539,6 +543,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
+            camera_controls=(),
         )
         resolve_video.assert_not_called()
         iter_video.assert_not_called()
@@ -1072,6 +1077,79 @@ class ControlledIlluminationPurePythonRunnerTests(
         cleanup_quality.assert_called_once_with(
             self.context.output_directory
         )
+
+    def test_camera_input_forwards_camera_controls(
+            self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+        frame_source = object()
+
+        camera_controls = (
+            CameraControlRequest(
+                name="auto_exposure",
+                property_id=21,
+                requested_value=0.25,
+            ),
+            CameraControlRequest(
+                name="exposure",
+                property_id=15,
+                requested_value=-6.0,
+            ),
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+                return_value=frame_source,
+            ) as iter_camera,
+            patch(
+                f"{RUNNER_MODULE}."
+                "resolve_video_path",
+            ) as resolve_video,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_video_frames",
+            ) as iter_video,
+        ):
+            selected_source = (
+                pure_python_runner
+                .create_frame_source(
+                    benchmark_config,
+                    width=640,
+                    height=480,
+                    fps=30.0,
+                    camera_controls=(
+                        camera_controls
+                    ),
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": (
+                            "camera"
+                        ),
+                        "VISIONLAB_CAMERA_INDEX": "2",
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_camera.assert_called_once_with(
+            2,
+            width=640,
+            height=480,
+            fps=30.0,
+            camera_controls=(
+                camera_controls
+            ),
+        )
+
+        resolve_video.assert_not_called()
+        iter_video.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

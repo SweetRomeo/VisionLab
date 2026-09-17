@@ -19,6 +19,11 @@ from benchmarks.realtime.camera_controls import (
     CameraControlResult,
 )
 
+from benchmarks.realtime.picamera2_controls import (
+    Picamera2ControlProfile,
+    Picamera2ControlResult,
+)
+
 PREFLIGHT_MODULE = (
     "benchmarks.experiments."
     "controlled_illumination_camera_preflight"
@@ -154,6 +159,7 @@ class ControlledIlluminationCameraPreflightTests(
     ) -> None:
         result = (
             camera_preflight.CameraPreflightResult(
+                camera_backend="opencv",
                 camera_index=0,
                 effective_width=16,
                 effective_height=12,
@@ -199,16 +205,22 @@ class ControlledIlluminationCameraPreflightTests(
 
         self.assertEqual(exit_code, 0)
         run_preflight.assert_called_once_with(
+            camera_backend="opencv",
             camera_index=0,
             width=16,
             height=12,
             fps=30.0,
             sample_frames=3,
             camera_controls=(),
+            picamera2_control_profile=None,
         )
 
         output = captured_output.getvalue()
 
+        self.assertIn(
+            "Camera backend: opencv",
+            output,
+        )
         self.assertIn(
             "Camera preflight passed",
             output,
@@ -432,6 +444,347 @@ class ControlledIlluminationCameraPreflightTests(
 
         self.assertIn(
             "explicit auto_exposure",
+            captured_error.getvalue(),
+        )
+
+    def test_preflight_uses_opencv_backend_by_default(
+            self,
+    ) -> None:
+        frame_source = MagicMock()
+        frame_source.__next__.return_value = object()
+
+        def create_frame_source(
+                camera_index: int,
+                **arguments,
+        ):
+            arguments["capture_mode_reporter"](
+                16,
+                12,
+                30.0,
+            )
+            arguments["camera_controls_reporter"](
+                ()
+            )
+            return frame_source
+
+        with (
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "iter_camera_frames",
+                side_effect=create_frame_source,
+            ) as iter_camera,
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "iter_picamera2_frames",
+            ) as iter_picamera2,
+        ):
+            result = (
+                camera_preflight
+                .run_camera_preflight(
+                    camera_index=0,
+                    width=16,
+                    height=12,
+                    fps=30.0,
+                    sample_frames=1,
+                )
+            )
+
+        self.assertEqual(
+            result.camera_backend,
+            "opencv",
+        )
+
+        iter_camera.assert_called_once()
+        iter_picamera2.assert_not_called()
+
+    def test_preflight_uses_picamera2_backend(
+            self,
+    ) -> None:
+        frame_source = MagicMock()
+        frame_source.__next__.return_value = object()
+
+        profile = Picamera2ControlProfile(
+            ae_enable=False,
+            exposure_time_us=10000,
+        )
+
+        control_result = Picamera2ControlResult(
+            name="exposure_time_us",
+            control_name="ExposureTime",
+            requested_value=10000,
+            applied=True,
+            effective_value=10000,
+            verified=True,
+            matches_requested=True,
+        )
+
+        def create_frame_source(
+                camera_index: int,
+                **arguments,
+        ):
+            arguments["capture_mode_reporter"](
+                16,
+                12,
+                29.97,
+            )
+            arguments["control_reporter"](
+                (
+                    control_result,
+                )
+            )
+            return frame_source
+
+        with (
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "iter_picamera2_frames",
+                side_effect=create_frame_source,
+            ) as iter_picamera2,
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "iter_camera_frames",
+            ) as iter_camera,
+        ):
+            result = (
+                camera_preflight
+                .run_camera_preflight(
+                    camera_backend="picamera2",
+                    camera_index=0,
+                    width=16,
+                    height=12,
+                    fps=30.0,
+                    sample_frames=1,
+                    picamera2_control_profile=profile,
+                )
+            )
+
+        self.assertEqual(
+            result.camera_backend,
+            "picamera2",
+        )
+        self.assertEqual(
+            result.effective_width,
+            16,
+        )
+        self.assertEqual(
+            result.effective_height,
+            12,
+        )
+        self.assertAlmostEqual(
+            result.effective_fps,
+            29.97,
+        )
+        self.assertEqual(
+            result.camera_controls,
+            (
+                control_result,
+            ),
+        )
+
+        iter_picamera2.assert_called_once_with(
+            0,
+            width=16,
+            height=12,
+            fps=30.0,
+            control_profile=profile,
+            control_reporter=ANY,
+            capture_mode_reporter=ANY,
+        )
+
+        iter_camera.assert_not_called()
+
+    def test_unsupported_camera_backend_is_rejected(
+            self,
+    ) -> None:
+        with (
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "iter_camera_frames",
+            ) as iter_camera,
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "iter_picamera2_frames",
+            ) as iter_picamera2,
+        ):
+            with self.assertRaisesRegex(
+                    ValueError,
+                    "Unsupported camera backend",
+            ):
+                camera_preflight.run_camera_preflight(
+                    camera_backend="unknown",
+                    camera_index=0,
+                    width=16,
+                    height=12,
+                    fps=30.0,
+                    sample_frames=1,
+                )
+
+        iter_camera.assert_not_called()
+        iter_picamera2.assert_not_called()
+
+    def test_cli_routes_picamera2_backend(
+            self,
+    ) -> None:
+        result = (
+            camera_preflight.CameraPreflightResult(
+                camera_backend="picamera2",
+                camera_index=0,
+                effective_width=16,
+                effective_height=12,
+                effective_fps=30.0,
+                sampled_frame_count=1,
+                camera_controls=(),
+            )
+        )
+
+        with patch(
+                f"{PREFLIGHT_MODULE}."
+                "run_camera_preflight",
+                return_value=result,
+        ) as run_preflight:
+            exit_code = camera_preflight.run_cli(
+                [
+                    "--camera-backend",
+                    "picamera2",
+                    "--camera-index",
+                    "0",
+                    "--width",
+                    "16",
+                    "--height",
+                    "12",
+                    "--fps",
+                    "30",
+                    "--sample-frames",
+                    "1",
+                ]
+            )
+
+        self.assertEqual(
+            exit_code,
+            0,
+        )
+
+        run_preflight.assert_called_once_with(
+            camera_backend="picamera2",
+            camera_index=0,
+            width=16,
+            height=12,
+            fps=30.0,
+            sample_frames=1,
+            camera_controls=(),
+            picamera2_control_profile=(
+                Picamera2ControlProfile()
+            ),
+        )
+
+    def test_cli_routes_picamera2_controls(
+            self,
+    ) -> None:
+        result = (
+            camera_preflight.CameraPreflightResult(
+                camera_backend="picamera2",
+                camera_index=0,
+                effective_width=16,
+                effective_height=12,
+                effective_fps=30.0,
+                sampled_frame_count=1,
+                camera_controls=(),
+            )
+        )
+
+        with patch(
+                f"{PREFLIGHT_MODULE}."
+                "run_camera_preflight",
+                return_value=result,
+        ) as run_preflight:
+            exit_code = camera_preflight.run_cli(
+                [
+                    "--camera-backend",
+                    "picamera2",
+                    "--camera-index",
+                    "0",
+                    "--width",
+                    "16",
+                    "--height",
+                    "12",
+                    "--fps",
+                    "30",
+                    "--sample-frames",
+                    "1",
+                    "--ae-enable",
+                    "false",
+                    "--exposure-time-us",
+                    "10000",
+                    "--analogue-gain",
+                    "2.0",
+                    "--awb-enable",
+                    "false",
+                    "--colour-gains",
+                    "1.5",
+                    "1.25",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+
+        run_preflight.assert_called_once_with(
+            camera_backend="picamera2",
+            camera_index=0,
+            width=16,
+            height=12,
+            fps=30.0,
+            sample_frames=1,
+            camera_controls=(),
+            picamera2_control_profile=(
+                Picamera2ControlProfile(
+                    ae_enable=False,
+                    exposure_time_us=10000,
+                    analogue_gain=2.0,
+                    awb_enable=False,
+                    colour_gains=(
+                        1.5,
+                        1.25,
+                    ),
+                )
+            ),
+        )
+
+    def test_cli_rejects_picamera2_manual_exposure_without_ae_disabled(
+            self,
+    ) -> None:
+        captured_error = StringIO()
+
+        with (
+            patch(
+                f"{PREFLIGHT_MODULE}."
+                "run_camera_preflight",
+            ) as run_preflight,
+            redirect_stderr(captured_error),
+        ):
+            exit_code = camera_preflight.run_cli(
+                [
+                    "--camera-backend",
+                    "picamera2",
+                    "--camera-index",
+                    "0",
+                    "--width",
+                    "16",
+                    "--height",
+                    "12",
+                    "--fps",
+                    "30",
+                    "--sample-frames",
+                    "1",
+                    "--exposure-time-us",
+                    "10000",
+                ]
+            )
+
+        self.assertEqual(exit_code, 1)
+        run_preflight.assert_not_called()
+
+        self.assertIn(
+            "ae_enable",
             captured_error.getvalue(),
         )
 

@@ -18,7 +18,9 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     validate_utc_timestamp,
     validate_camera_control_metadata,
     ControlledIlluminationRunMetadata,
+    attach_camera_control_metadata,
     load_run_metadata,
+    save_run_metadata_atomic,
 )
 from benchmarks.experiments.controlled_illumination_run_state import (
     validate_run_plan_sha256,
@@ -1465,6 +1467,50 @@ def load_execution_summary(
         summary_value
     )
 
+def synchronize_camera_controls_into_run_metadata(
+    run_directory: str | Path,
+    config: dict[str, Any],
+) -> None:
+    resolved_directory = resolve_run_directory(
+        run_directory
+    )
+    metadata_path = (
+        resolved_directory
+        / RUN_METADATA_FILE_NAME
+    )
+
+    summary = load_execution_summary(
+        resolved_directory
+    )
+
+    if not summary.camera_controls:
+        return
+
+    try:
+        metadata = load_run_metadata(
+            metadata_path,
+            config=config,
+        )
+
+        updated_metadata = (
+            attach_camera_control_metadata(
+                metadata,
+                summary.camera_controls,
+            )
+        )
+
+        save_run_metadata_atomic(
+            updated_metadata,
+            config=config,
+            output_path=metadata_path,
+        )
+    except (OSError, ValueError) as error:
+        raise ControlledIlluminationRunBundleError(
+            "Camera controls could not be "
+            "synchronized into run metadata: "
+            f"{error}"
+        ) from error
+
 @dataclass(frozen=True)
 class ControlledIlluminationRunBundleManifest:
     schema_version: int
@@ -1792,6 +1838,11 @@ def finalize_run_bundle_atomic(
     ControlledIlluminationRunBundleManifest,
     Path,
 ]:
+    synchronize_camera_controls_into_run_metadata(
+        run_directory,
+        config,
+    )
+
     manifest = validate_run_bundle(
         run_directory,
         planned_run,

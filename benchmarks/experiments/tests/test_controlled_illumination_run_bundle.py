@@ -34,6 +34,7 @@ from benchmarks.experiments.controlled_illumination_run_bundle import (
 
 from benchmarks.experiments.controlled_illumination_metadata import (
     load_controlled_illumination_config,
+    load_run_metadata,
     save_run_metadata_atomic,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
@@ -1266,6 +1267,148 @@ class ControlledIlluminationRunBundleTests(
             manifest.metadata_dry_run,
             metadata.dry_run,
         )
+
+    def test_finalization_synchronizes_camera_controls_into_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            camera_controls = {
+                "exposure": {
+                    "property_id": 15,
+                    "requested": -6.0,
+                    "effective": -6.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value["camera_controls"] = (
+                camera_controls
+            )
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            finalize_run_bundle_atomic(
+                run_directory,
+                planned_run,
+                config,
+                VALID_PLAN_SHA256,
+                "2026-08-26T11:00:00Z",
+            )
+
+            updated_metadata = load_run_metadata(
+                run_directory
+                / RUN_METADATA_FILE_NAME,
+                config=config,
+            )
+
+            self.assertEqual(
+                updated_metadata.camera_settings[
+                    "controls"
+                ],
+                camera_controls,
+            )
+
+    def test_manifest_hash_includes_synchronized_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value["camera_controls"] = {
+                "gain": {
+                    "property_id": 14,
+                    "requested": 2.0,
+                    "effective": 2.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                }
+            }
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            manifest, _ = (
+                finalize_run_bundle_atomic(
+                    run_directory,
+                    planned_run,
+                    config,
+                    VALID_PLAN_SHA256,
+                    "2026-08-26T11:00:00Z",
+                )
+            )
+
+            metadata_path = (
+                    run_directory
+                    / RUN_METADATA_FILE_NAME
+            )
+
+            expected_metadata_hash = (
+                hashlib.sha256(
+                    metadata_path.read_bytes()
+                ).hexdigest()
+            )
+
+            metadata_artifact = next(
+                artifact
+                for artifact in manifest.artifacts
+                if artifact.file_name
+                == RUN_METADATA_FILE_NAME
+            )
+
+            self.assertEqual(
+                metadata_artifact.sha256,
+                expected_metadata_hash,
+            )
 
     def test_modified_frame_results_are_rejected(
         self,

@@ -735,6 +735,145 @@ def require_finite_metadata_number(
 
     return float(value)
 
+def validate_camera_control_metadata(
+    camera_settings: dict[str, Any],
+) -> None:
+    controls = camera_settings.get(
+        "controls"
+    )
+
+    if controls is None:
+        return
+
+    if not isinstance(controls, dict):
+        raise ControlledIlluminationMetadataError(
+            "camera_settings.controls must be an object."
+        )
+
+    required_fields = {
+        "property_id",
+        "requested",
+        "effective",
+        "applied",
+        "verified",
+        "matches_requested",
+    }
+
+    for control_name, control in controls.items():
+        if (
+            not isinstance(control_name, str)
+            or not control_name.strip()
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Camera control names must be "
+                "non-empty strings."
+            )
+
+        if not isinstance(control, dict):
+            raise ControlledIlluminationMetadataError(
+                "Camera control metadata must be "
+                f"an object: {control_name}"
+            )
+
+        actual_fields = set(control)
+
+        if actual_fields != required_fields:
+            raise ControlledIlluminationMetadataError(
+                "Camera control metadata fields "
+                f"are invalid: {control_name}"
+            )
+
+        property_id = control["property_id"]
+
+        if (
+            isinstance(property_id, bool)
+            or not isinstance(property_id, int)
+            or property_id < 0
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Camera control property_id must "
+                f"be a non-negative integer: "
+                f"{control_name}"
+            )
+
+        requested = control["requested"]
+
+        if (
+            isinstance(requested, bool)
+            or not isinstance(
+                requested,
+                (int, float),
+            )
+            or not math.isfinite(requested)
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Camera control requested value "
+                f"must be finite: {control_name}"
+            )
+
+        effective = control["effective"]
+
+        if effective is not None and (
+            isinstance(effective, bool)
+            or not isinstance(
+                effective,
+                (int, float),
+            )
+            or not math.isfinite(effective)
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Camera control effective value "
+                "must be finite or null: "
+                f"{control_name}"
+            )
+
+        applied = control["applied"]
+        verified = control["verified"]
+        matches_requested = control[
+            "matches_requested"
+        ]
+
+        if not isinstance(applied, bool):
+            raise ControlledIlluminationMetadataError(
+                "Camera control applied must be "
+                f"boolean: {control_name}"
+            )
+
+        if not isinstance(verified, bool):
+            raise ControlledIlluminationMetadataError(
+                "Camera control verified must be "
+                f"boolean: {control_name}"
+            )
+
+        if (
+            matches_requested is not None
+            and not isinstance(
+                matches_requested,
+                bool,
+            )
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Camera control matches_requested "
+                "must be boolean or null: "
+                f"{control_name}"
+            )
+
+        if verified and effective is None:
+            raise ControlledIlluminationMetadataError(
+                "Verified camera control requires "
+                "an effective value: "
+                f"{control_name}"
+            )
+
+        if (
+            not verified
+            and matches_requested is not None
+        ):
+            raise ControlledIlluminationMetadataError(
+                "Unverified camera control cannot "
+                "define matches_requested: "
+                f"{control_name}"
+            )
 
 def validate_run_metadata(
     metadata: ControlledIlluminationRunMetadata,
@@ -1002,6 +1141,10 @@ def validate_run_metadata(
             "Missing camera settings: "
             f"{sorted(missing_camera_settings)}"
         )
+
+    validate_camera_control_metadata(
+        metadata.camera_settings
+    )
 
     for field_name, distance in (
         (

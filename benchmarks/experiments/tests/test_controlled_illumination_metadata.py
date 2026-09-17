@@ -428,6 +428,98 @@ class ControlledIlluminationMetadataTests(
                 config
             )
 
+    def test_camera_control_metadata_is_valid(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "exposure": {
+                "property_id": 15,
+                "requested": -6.0,
+                "effective": -6.0,
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            }
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        validate_run_metadata(
+            metadata,
+            self.config,
+        )
+
+    def test_verified_camera_control_requires_effective_value(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "exposure": {
+                "property_id": 15,
+                "requested": -6.0,
+                "effective": None,
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            }
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationMetadataError,
+                "Verified camera control requires",
+        ):
+            validate_run_metadata(
+                metadata,
+                self.config,
+            )
+
+    def test_unverified_camera_control_cannot_match_requested(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "focus": {
+                "property_id": 28,
+                "requested": 20.0,
+                "effective": None,
+                "applied": True,
+                "verified": False,
+                "matches_requested": True,
+            }
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationMetadataError,
+                "Unverified camera control cannot",
+        ):
+            validate_run_metadata(
+                metadata,
+                self.config,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

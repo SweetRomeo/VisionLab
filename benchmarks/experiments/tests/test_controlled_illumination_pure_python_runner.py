@@ -554,6 +554,137 @@ class ControlledIlluminationPurePythonRunnerTests(
         resolve_video.assert_not_called()
         iter_video.assert_not_called()
 
+    def test_camera_input_uses_opencv_backend_by_default(
+            self,
+    ) -> None:
+        frame_source = object()
+
+        with patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+                return_value=frame_source,
+        ) as iter_camera:
+            selected_source = (
+                pure_python_runner.create_frame_source(
+                    {},
+                    width=640,
+                    height=480,
+                    fps=30.0,
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "0",
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_camera.assert_called_once_with(
+            0,
+            width=640,
+            height=480,
+            fps=30.0,
+            camera_controls=(),
+            camera_controls_reporter=None,
+        )
+
+    def test_unknown_camera_backend_is_rejected(
+            self,
+    ) -> None:
+        with patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+        ) as iter_camera:
+            with self.assertRaisesRegex(
+                    ControlledIlluminationPurePythonRunnerError,
+                    "Unsupported camera backend",
+            ):
+                pure_python_runner.create_frame_source(
+                    {},
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "0",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "unknown-backend"
+                        ),
+                    },
+                )
+
+        iter_camera.assert_not_called()
+
+    def test_picamera2_backend_uses_picamera2_frame_source(
+            self,
+    ) -> None:
+        frame_source = object()
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_picamera2_frames",
+                return_value=frame_source,
+            ) as iter_picamera2,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+            ) as iter_camera,
+        ):
+            selected_source = (
+                pure_python_runner.create_frame_source(
+                    {},
+                    width=1280,
+                    height=720,
+                    fps=30.0,
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "0",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "picamera2"
+                        ),
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_picamera2.assert_called_once_with(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+        )
+
+        iter_camera.assert_not_called()
+
+    def test_picamera2_backend_requires_capture_mode(
+            self,
+    ) -> None:
+        with patch(
+                f"{RUNNER_MODULE}."
+                "iter_picamera2_frames",
+        ) as iter_picamera2:
+            with self.assertRaisesRegex(
+                    ControlledIlluminationPurePythonRunnerError,
+                    "requires width, height, and fps",
+            ):
+                pure_python_runner.create_frame_source(
+                    {},
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "0",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "picamera2"
+                        ),
+                    },
+                )
+
+        iter_picamera2.assert_not_called()
+
     def test_invalid_camera_index_configuration_is_rejected(
         self,
     ) -> None:

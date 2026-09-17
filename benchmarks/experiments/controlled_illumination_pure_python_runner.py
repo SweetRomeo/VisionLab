@@ -51,6 +51,9 @@ from benchmarks.realtime.camera_controls import (
     camera_control_results_to_metadata,
     create_camera_control_requests,
 )
+from benchmarks.realtime.picamera2_camera import (
+    iter_picamera2_frames,
+)
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -63,6 +66,12 @@ CAMERA_INPUT_SOURCE = "camera"
 CAMERA_INDEX_VARIABLE = (
     "VISIONLAB_CAMERA_INDEX"
 )
+CAMERA_BACKEND_VARIABLE = (
+    "VISIONLAB_CAMERA_BACKEND"
+)
+
+OPENCV_CAMERA_BACKEND = "opencv"
+PICAMERA2_CAMERA_BACKEND = "picamera2"
 EXPERIMENT_CONFIG_VARIABLE = (
     "VISIONLAB_EXPERIMENT_CONFIG"
 )
@@ -293,15 +302,59 @@ def create_frame_source(
                 "a non-negative integer."
             )
 
-        return iter_camera_frames(
-            camera_index,
-            width=width,
-            height=height,
-            fps=fps,
-            camera_controls=camera_controls,
-            camera_controls_reporter=(
-                camera_controls_reporter
-            ),
+        raw_camera_backend = (
+            active_environment.get(
+                CAMERA_BACKEND_VARIABLE,
+                OPENCV_CAMERA_BACKEND,
+            )
+        )
+
+        if (
+                not isinstance(raw_camera_backend, str)
+                or not raw_camera_backend.strip()
+        ):
+            raise ControlledIlluminationPurePythonRunnerError(
+                f"{CAMERA_BACKEND_VARIABLE} must contain "
+                "a non-empty string."
+            )
+
+        camera_backend = (
+            raw_camera_backend.strip().lower()
+        )
+
+        if camera_backend == OPENCV_CAMERA_BACKEND:
+            return iter_camera_frames(
+                camera_index,
+                width=width,
+                height=height,
+                fps=fps,
+                camera_controls=camera_controls,
+                camera_controls_reporter=(
+                    camera_controls_reporter
+                ),
+            )
+
+        if camera_backend == PICAMERA2_CAMERA_BACKEND:
+            if (
+                    width is None
+                    or height is None
+                    or fps is None
+            ):
+                raise ControlledIlluminationPurePythonRunnerError(
+                    "Picamera2 camera backend requires "
+                    "width, height, and fps."
+                )
+
+            return iter_picamera2_frames(
+                camera_index,
+                width=width,
+                height=height,
+                fps=fps,
+            )
+
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Unsupported camera backend: "
+            f"{camera_backend}"
         )
 
     raise ControlledIlluminationPurePythonRunnerError(

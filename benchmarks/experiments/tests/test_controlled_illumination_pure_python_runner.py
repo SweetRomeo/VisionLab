@@ -15,6 +15,7 @@ from benchmarks.experiments.controlled_illumination_pure_python_runner import (
     ControlledIlluminationPurePythonRunnerError,
     execute_pure_python_run,
     load_camera_control_profile,
+    load_picamera2_control_profile,
     run_cli,
     select_algorithm_configuration,
     validate_context_against_configuration,
@@ -37,6 +38,11 @@ from benchmarks.experiments import (
 from benchmarks.realtime.camera_controls import (
     CameraControlError,
     CameraControlRequest,
+)
+
+from benchmarks.realtime.picamera2_controls import (
+    Picamera2ControlProfile,
+    Picamera2ControlResult,
 )
 
 RUNNER_MODULE = (
@@ -245,7 +251,7 @@ class ControlledIlluminationPurePythonRunnerTests(
                 )
 
     def test_execute_writes_completed_artifacts(
-        self,
+            self,
     ) -> None:
         benchmark_config = {
             "test": "benchmark-config",
@@ -345,6 +351,185 @@ class ControlledIlluminationPurePythonRunnerTests(
             actual_paths,
             expected_paths,
         )
+
+        load_context.assert_called_once_with(
+            environment,
+            expected_architecture="pure_python",
+        )
+
+        create_source.assert_called_once_with(
+            benchmark_config,
+            width=640,
+            height=480,
+            fps=30.0,
+            camera_controls=(),
+            camera_controls_reporter=ANY,
+            picamera2_control_profile=(
+                Picamera2ControlProfile()
+            ),
+            picamera2_control_reporter=ANY,
+            environment=environment,
+        )
+
+        run_trial.assert_called_once_with(
+            frame_source=frame_source,
+            processor=processor,
+            config=realtime_config,
+            architecture="pure_python",
+            algorithm="gamma_correction",
+            width=640,
+            height=480,
+            trial=1,
+            frame_capture_callback=None,
+        )
+
+        write_artifacts.assert_called_once_with(
+            self.context,
+            records,
+            started_at_utc=STARTED_AT,
+            finished_at_utc=FINISHED_AT,
+            warmup_frame_count=30,
+            camera_controls={},
+        )
+
+        write_quality_artifacts.assert_not_called()
+
+    def test_execute_writes_picamera2_controls_to_artifacts(
+        self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=30,
+            measured_frames=500,
+        )
+        algorithm_config = {
+            "name": "gamma_correction",
+            "parameters": {
+                "gamma_value": 0.6,
+            },
+        }
+        processor = object()
+        frame_source = object()
+        profile = Picamera2ControlProfile(
+            ae_enable=False,
+            exposure_time_us=10000,
+        )
+
+        control_result = Picamera2ControlResult(
+            name="exposure_time_us",
+            control_name="ExposureTime",
+            requested_value=10000,
+            applied=True,
+            effective_value=10000,
+            verified=True,
+            matches_requested=True,
+        )
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "2",
+        }
+        records = (object(),)
+        expected_paths = (
+            Path("realtime_frame_results.csv"),
+            Path("execution_summary.json"),
+        )
+
+        timestamps = iter(
+            [
+                STARTED_AT,
+                FINISHED_AT,
+            ]
+        )
+
+        def create_picamera2_source(
+                *args,
+                **kwargs,
+        ):
+            reporter = kwargs[
+                "picamera2_control_reporter"
+            ]
+
+            reporter(
+                (
+                    control_result,
+                )
+            )
+
+            return frame_source
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_picamera2_control_profile",
+                return_value=profile,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ) as load_context,
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value=benchmark_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value=algorithm_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=processor,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                side_effect=create_picamera2_source,
+            ) as create_source,
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                return_value=records,
+            ) as run_trial,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+                return_value=expected_paths,
+            ) as write_artifacts,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+            ) as write_quality_artifacts,
+        ):
+            actual_paths = execute_pure_python_run(
+                environment,
+                now_provider=lambda: next(
+                    timestamps
+                ),
+            )
+
+        self.assertEqual(
+            actual_paths,
+            expected_paths,
+        )
         load_context.assert_called_once_with(
             environment,
             expected_architecture="pure_python",
@@ -356,6 +541,8 @@ class ControlledIlluminationPurePythonRunnerTests(
             fps=30.0,
             camera_controls=(),
             camera_controls_reporter=ANY,
+            picamera2_control_profile=profile,
+            picamera2_control_reporter=ANY,
             environment=environment,
         )
         run_trial.assert_called_once_with(
@@ -375,7 +562,17 @@ class ControlledIlluminationPurePythonRunnerTests(
             started_at_utc=STARTED_AT,
             finished_at_utc=FINISHED_AT,
             warmup_frame_count=30,
-            camera_controls={},
+            camera_controls={
+                "exposure_time_us": {
+                    "backend": "picamera2",
+                    "control_name": "ExposureTime",
+                    "requested": 10000,
+                    "effective": 10000,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                },
+            },
         )
         write_quality_artifacts.assert_not_called()
 
@@ -620,6 +817,13 @@ class ControlledIlluminationPurePythonRunnerTests(
     ) -> None:
         frame_source = object()
 
+        profile = Picamera2ControlProfile(
+            ae_enable=False,
+            exposure_time_us=10000,
+        )
+
+        reporter = Mock()
+
         with (
             patch(
                 f"{RUNNER_MODULE}."
@@ -637,6 +841,8 @@ class ControlledIlluminationPurePythonRunnerTests(
                     width=1280,
                     height=720,
                     fps=30.0,
+                    picamera2_control_profile=profile,
+                    picamera2_control_reporter=reporter,
                     environment={
                         "VISIONLAB_INPUT_SOURCE": "camera",
                         "VISIONLAB_CAMERA_INDEX": "0",
@@ -657,6 +863,8 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=1280,
             height=720,
             fps=30.0,
+            control_profile=profile,
+            control_reporter=reporter,
         )
 
         iter_camera.assert_not_called()
@@ -1574,6 +1782,96 @@ class ControlledIlluminationPurePythonRunnerTests(
                 reporter
             ),
         )
+
+    def test_missing_picamera2_control_profile_returns_empty_profile(
+            self,
+    ) -> None:
+        profile = load_picamera2_control_profile({})
+
+        self.assertEqual(
+            profile,
+            Picamera2ControlProfile(),
+        )
+
+    def test_picamera2_control_profile_is_loaded(
+            self,
+    ) -> None:
+        profile = load_picamera2_control_profile(
+            {
+                "picamera2_control_profile": {
+                    "ae_enable": False,
+                    "exposure_time_us": 10000,
+                    "analogue_gain": 2.0,
+                    "awb_enable": False,
+                    "colour_gains": [
+                        1.5,
+                        1.8,
+                    ],
+                }
+            }
+        )
+
+        self.assertEqual(
+            profile,
+            Picamera2ControlProfile(
+                ae_enable=False,
+                exposure_time_us=10000,
+                analogue_gain=2.0,
+                awb_enable=False,
+                colour_gains=(
+                    1.5,
+                    1.8,
+                ),
+            ),
+        )
+
+    def test_unknown_picamera2_control_profile_field_is_rejected(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "Unsupported Picamera2 control profile fields",
+        ):
+            load_picamera2_control_profile(
+                {
+                    "picamera2_control_profile": {
+                        "unsupported": 1,
+                    }
+                }
+            )
+
+    def test_invalid_picamera2_manual_exposure_is_rejected(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "ae_enable",
+        ):
+            load_picamera2_control_profile(
+                {
+                    "picamera2_control_profile": {
+                        "exposure_time_us": 10000,
+                    }
+                }
+            )
+
+    def test_invalid_picamera2_colour_gains_are_rejected(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "colour_gains",
+        ):
+            load_picamera2_control_profile(
+                {
+                    "picamera2_control_profile": {
+                        "awb_enable": False,
+                        "colour_gains": [
+                            1.5,
+                        ],
+                    }
+                }
+            )
 
 if __name__ == "__main__":
     unittest.main()

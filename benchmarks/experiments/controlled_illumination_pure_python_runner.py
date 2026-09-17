@@ -54,6 +54,12 @@ from benchmarks.realtime.camera_controls import (
 from benchmarks.realtime.picamera2_camera import (
     iter_picamera2_frames,
 )
+from benchmarks.realtime.picamera2_controls import (
+    Picamera2ControlProfile,
+    Picamera2ControlResult,
+    picamera2_control_results_to_metadata,
+    validate_picamera2_control_profile,
+)
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -213,6 +219,100 @@ def load_camera_control_profile(
 
     return profile
 
+def load_picamera2_control_profile(
+    experiment_config: dict[str, Any],
+) -> Picamera2ControlProfile:
+    raw_profile = experiment_config.get(
+        "picamera2_control_profile"
+    )
+
+    if raw_profile is None:
+        return Picamera2ControlProfile()
+
+    if not isinstance(
+        raw_profile,
+        dict,
+    ):
+        raise ControlledIlluminationPurePythonRunnerError(
+            "picamera2_control_profile must be an object."
+        )
+
+    supported_fields = {
+        "ae_enable",
+        "exposure_time_us",
+        "analogue_gain",
+        "awb_enable",
+        "colour_gains",
+    }
+
+    unknown_fields = (
+        set(raw_profile)
+        - supported_fields
+    )
+
+    if unknown_fields:
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Unsupported Picamera2 control profile fields: "
+            f"{sorted(unknown_fields)}"
+        )
+
+    raw_colour_gains = raw_profile.get(
+        "colour_gains"
+    )
+
+    colour_gains = None
+
+    if raw_colour_gains is not None:
+        if (
+            not isinstance(
+                raw_colour_gains,
+                (list, tuple),
+            )
+            or len(raw_colour_gains) != 2
+        ):
+            raise ControlledIlluminationPurePythonRunnerError(
+                "picamera2_control_profile "
+                "colour_gains must contain "
+                "exactly two values."
+            )
+
+        colour_gains = (
+            raw_colour_gains[0],
+            raw_colour_gains[1],
+        )
+
+    try:
+        profile = Picamera2ControlProfile(
+            ae_enable=raw_profile.get(
+                "ae_enable"
+            ),
+            exposure_time_us=raw_profile.get(
+                "exposure_time_us"
+            ),
+            analogue_gain=raw_profile.get(
+                "analogue_gain"
+            ),
+            awb_enable=raw_profile.get(
+                "awb_enable"
+            ),
+            colour_gains=colour_gains,
+        )
+
+        validate_picamera2_control_profile(
+            profile
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as error:
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Invalid picamera2_control_profile: "
+            f"{error}"
+        ) from error
+
+    return profile
+
 def create_frame_source(
     benchmark_config: dict[str, Any],
     *,
@@ -228,6 +328,21 @@ def create_frame_source(
             [
                 tuple[
                     CameraControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
+        | None
+    ) = None,
+    picamera2_control_profile: (
+        Picamera2ControlProfile | None
+    ) = None,
+    picamera2_control_reporter: (
+        Callable[
+            [
+                tuple[
+                    Picamera2ControlResult,
                     ...,
                 ]
             ],
@@ -350,6 +465,12 @@ def create_frame_source(
                 width=width,
                 height=height,
                 fps=fps,
+                control_profile=(
+                    picamera2_control_profile
+                ),
+                control_reporter=(
+                    picamera2_control_reporter
+                ),
             )
 
         raise ControlledIlluminationPurePythonRunnerError(
@@ -464,6 +585,12 @@ def execute_pure_python_run(
         )
     )
 
+    picamera2_control_profile = (
+        load_picamera2_control_profile(
+            experiment_config
+        )
+    )
+
     camera_controls = (
         create_camera_control_requests(
             camera_control_profile
@@ -475,6 +602,11 @@ def execute_pure_python_run(
         ...,
     ] = ()
 
+    effective_picamera2_controls: tuple[
+        Picamera2ControlResult,
+        ...,
+    ] = ()
+
     def report_camera_controls(
             results: tuple[
                 CameraControlResult,
@@ -483,6 +615,18 @@ def execute_pure_python_run(
     ) -> None:
         nonlocal effective_camera_controls
         effective_camera_controls = results
+
+    def report_picamera2_controls(
+            results: tuple[
+                Picamera2ControlResult,
+                ...,
+            ],
+    ) -> None:
+        nonlocal effective_picamera2_controls
+
+        effective_picamera2_controls = (
+            results
+        )
 
     quality_capture_config = (
         load_quality_capture_config(
@@ -525,6 +669,12 @@ def execute_pure_python_run(
         camera_controls_reporter=(
             report_camera_controls
         ),
+        picamera2_control_profile=(
+            picamera2_control_profile
+        ),
+        picamera2_control_reporter=(
+            report_picamera2_controls
+        ),
         environment=environment,
     )
 
@@ -546,11 +696,18 @@ def execute_pure_python_run(
         ),
     )
 
-    camera_controls_metadata = (
-        camera_control_results_to_metadata(
-            effective_camera_controls
+    if effective_picamera2_controls:
+        camera_controls_metadata = (
+            picamera2_control_results_to_metadata(
+                effective_picamera2_controls
+            )
         )
-    )
+    else:
+        camera_controls_metadata = (
+            camera_control_results_to_metadata(
+                effective_camera_controls
+            )
+        )
 
     if (
             quality_capture_config.enabled
@@ -606,7 +763,6 @@ def execute_pure_python_run(
         raise
 
     return artifact_paths
-
 
 def run_cli() -> int:
     try:

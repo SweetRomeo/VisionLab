@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import (
+    asdict,
+    dataclass,
+    fields,
+    replace,
+)
 from datetime import datetime, timezone
 import json
 import math
@@ -874,6 +879,55 @@ def validate_camera_control_metadata(
                 "define matches_requested: "
                 f"{control_name}"
             )
+
+def attach_camera_control_metadata(
+    metadata: ControlledIlluminationRunMetadata,
+    controls: dict[
+        str,
+        dict[str, object],
+    ],
+) -> ControlledIlluminationRunMetadata:
+    if not isinstance(
+        metadata,
+        ControlledIlluminationRunMetadata,
+    ):
+        raise TypeError(
+            "metadata must be "
+            "ControlledIlluminationRunMetadata."
+        )
+
+    if not isinstance(controls, dict):
+        raise TypeError(
+            "controls must be an object."
+        )
+
+    if not controls:
+        return metadata
+
+    camera_settings = dict(
+        metadata.camera_settings
+    )
+
+    camera_settings["controls"] = controls
+
+    validate_camera_control_metadata(
+        camera_settings
+    )
+
+    copied_controls = {
+        control_name: dict(control)
+        for control_name, control
+        in controls.items()
+    }
+
+    camera_settings["controls"] = (
+        copied_controls
+    )
+
+    return replace(
+        metadata,
+        camera_settings=camera_settings,
+    )
 
 def validate_run_metadata(
     metadata: ControlledIlluminationRunMetadata,

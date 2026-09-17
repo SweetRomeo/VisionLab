@@ -45,6 +45,17 @@ class CameraControlResult:
     verified: bool
     matches_requested: bool | None
 
+
+@dataclass(frozen=True)
+class CameraControlProfile:
+    auto_exposure: float | None = None
+    exposure: float | None = None
+    gain: float | None = None
+    auto_white_balance: float | None = None
+    white_balance_temperature: float | None = None
+    autofocus: float | None = None
+    focus: float | None = None
+
 OPENCV_CAMERA_CONTROL_PROPERTIES: dict[
     str,
     int,
@@ -71,6 +82,92 @@ OPENCV_CAMERA_CONTROL_PROPERTIES: dict[
         cv2.CAP_PROP_FOCUS
     ),
 }
+
+def create_camera_control_requests(
+    profile: CameraControlProfile,
+) -> tuple[
+    CameraControlRequest,
+    ...,
+]:
+    if not isinstance(
+        profile,
+        CameraControlProfile,
+    ):
+        raise TypeError(
+            "profile must be a CameraControlProfile."
+        )
+
+    if (
+        (
+            profile.exposure is not None
+            or profile.gain is not None
+        )
+        and profile.auto_exposure is None
+    ):
+        raise ValueError(
+            "Manual exposure or gain requires "
+            "an explicit auto_exposure value."
+        )
+
+    if (
+        profile.white_balance_temperature
+        is not None
+        and profile.auto_white_balance
+        is None
+    ):
+        raise ValueError(
+            "Manual white balance requires "
+            "an explicit auto_white_balance value."
+        )
+
+    if (
+        profile.focus is not None
+        and profile.autofocus is None
+    ):
+        raise ValueError(
+            "Manual focus requires "
+            "an explicit autofocus value."
+        )
+
+    control_values = (
+        (
+            "auto_exposure",
+            profile.auto_exposure,
+        ),
+        (
+            "exposure",
+            profile.exposure,
+        ),
+        (
+            "gain",
+            profile.gain,
+        ),
+        (
+            "auto_white_balance",
+            profile.auto_white_balance,
+        ),
+        (
+            "white_balance_temperature",
+            profile.white_balance_temperature,
+        ),
+        (
+            "autofocus",
+            profile.autofocus,
+        ),
+        (
+            "focus",
+            profile.focus,
+        ),
+    )
+
+    return tuple(
+        create_opencv_camera_control_request(
+            name,
+            value,
+        )
+        for name, value in control_values
+        if value is not None
+    )
 
 def create_opencv_camera_control_request(
     name: str,

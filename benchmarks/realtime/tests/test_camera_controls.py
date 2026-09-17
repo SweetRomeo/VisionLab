@@ -4,9 +4,11 @@ from unittest.mock import MagicMock
 
 from benchmarks.realtime.camera_controls import (
     CameraControlError,
+    CameraControlProfile,
     CameraControlRequest,
     apply_camera_control,
     apply_camera_controls,
+    create_camera_control_requests,
     create_opencv_camera_control_request,
 )
 
@@ -282,6 +284,105 @@ class CameraControlTests(
                 "unknown-control",
                 1.0,
             )
+
+    def test_empty_camera_control_profile_creates_no_requests(
+            self,
+    ) -> None:
+        requests = (
+            create_camera_control_requests(
+                CameraControlProfile()
+            )
+        )
+
+        self.assertEqual(
+            requests,
+            (),
+        )
+
+    def test_manual_exposure_requires_auto_exposure(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ValueError,
+                "explicit auto_exposure",
+        ):
+            create_camera_control_requests(
+                CameraControlProfile(
+                    exposure=-6.0,
+                )
+            )
+
+    def test_manual_gain_requires_auto_exposure(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ValueError,
+                "explicit auto_exposure",
+        ):
+            create_camera_control_requests(
+                CameraControlProfile(
+                    gain=1.0,
+                )
+            )
+
+    def test_manual_white_balance_requires_auto_white_balance(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ValueError,
+                "explicit auto_white_balance",
+        ):
+            create_camera_control_requests(
+                CameraControlProfile(
+                    white_balance_temperature=4500.0,
+                )
+            )
+
+    def test_manual_focus_requires_autofocus(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ValueError,
+                "explicit autofocus",
+        ):
+            create_camera_control_requests(
+                CameraControlProfile(
+                    focus=20.0,
+                )
+            )
+
+    def test_profile_creates_controls_in_deterministic_order(
+            self,
+    ) -> None:
+        requests = (
+            create_camera_control_requests(
+                CameraControlProfile(
+                    auto_exposure=0.25,
+                    exposure=-6.0,
+                    gain=1.0,
+                    auto_white_balance=0.0,
+                    white_balance_temperature=4500.0,
+                    autofocus=0.0,
+                    focus=20.0,
+                )
+            )
+        )
+
+        self.assertEqual(
+            [
+                request.name
+                for request in requests
+            ],
+            [
+                "auto_exposure",
+                "exposure",
+                "gain",
+                "auto_white_balance",
+                "white_balance_temperature",
+                "autofocus",
+                "focus",
+            ],
+        )
 
 if __name__ == "__main__":
     unittest.main()

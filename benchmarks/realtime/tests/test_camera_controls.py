@@ -6,12 +6,13 @@ from benchmarks.realtime.camera_controls import (
     CameraControlError,
     CameraControlProfile,
     CameraControlRequest,
+    CameraControlResult,
     apply_camera_control,
     apply_camera_controls,
+    camera_control_results_to_metadata,
     create_camera_control_requests,
     create_opencv_camera_control_request,
 )
-
 
 class CameraControlTests(
     unittest.TestCase
@@ -383,6 +384,138 @@ class CameraControlTests(
                 "focus",
             ],
         )
+
+    def test_camera_control_results_are_converted_to_metadata(
+            self,
+    ) -> None:
+        results = (
+            CameraControlResult(
+                name="exposure",
+                property_id=15,
+                requested_value=-6.0,
+                applied=True,
+                effective_value=-6.0,
+                verified=True,
+                matches_requested=True,
+            ),
+            CameraControlResult(
+                name="gain",
+                property_id=14,
+                requested_value=1.0,
+                applied=True,
+                effective_value=1.0,
+                verified=True,
+                matches_requested=True,
+            ),
+        )
+
+        metadata = (
+            camera_control_results_to_metadata(
+                results
+            )
+        )
+
+        self.assertEqual(
+            metadata,
+            {
+                "exposure": {
+                    "property_id": 15,
+                    "requested": -6.0,
+                    "effective": -6.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                },
+                "gain": {
+                    "property_id": 14,
+                    "requested": 1.0,
+                    "effective": 1.0,
+                    "applied": True,
+                    "verified": True,
+                    "matches_requested": True,
+                },
+            },
+        )
+
+    def test_unverified_camera_control_result_is_preserved_in_metadata(
+            self,
+    ) -> None:
+        results = (
+            CameraControlResult(
+                name="focus",
+                property_id=28,
+                requested_value=20.0,
+                applied=True,
+                effective_value=None,
+                verified=False,
+                matches_requested=None,
+            ),
+        )
+
+        metadata = (
+            camera_control_results_to_metadata(
+                results
+            )
+        )
+
+        self.assertEqual(
+            metadata["focus"]["requested"],
+            20.0,
+        )
+        self.assertIsNone(
+            metadata["focus"]["effective"]
+        )
+        self.assertFalse(
+            metadata["focus"]["verified"]
+        )
+        self.assertIsNone(
+            metadata["focus"][
+                "matches_requested"
+            ]
+        )
+
+    def test_camera_control_metadata_requires_tuple(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                TypeError,
+                "results must be a tuple",
+        ):
+            camera_control_results_to_metadata(
+                []
+            )
+
+    def test_duplicate_camera_control_results_are_rejected(
+            self,
+    ) -> None:
+        results = (
+            CameraControlResult(
+                name="exposure",
+                property_id=15,
+                requested_value=-6.0,
+                applied=True,
+                effective_value=-6.0,
+                verified=True,
+                matches_requested=True,
+            ),
+            CameraControlResult(
+                name="exposure",
+                property_id=15,
+                requested_value=-5.0,
+                applied=True,
+                effective_value=-5.0,
+                verified=True,
+                matches_requested=True,
+            ),
+        )
+
+        with self.assertRaisesRegex(
+                ValueError,
+                "Duplicate camera control result",
+        ):
+            camera_control_results_to_metadata(
+                results
+            )
 
 if __name__ == "__main__":
     unittest.main()

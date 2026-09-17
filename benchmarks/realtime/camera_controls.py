@@ -485,3 +485,52 @@ def apply_camera_controls(
         )
 
     return tuple(results)
+
+def camera_control_results_to_metadata(
+    results: tuple[
+        CameraControlResult,
+        ...,
+    ],
+) -> dict[str, dict[str, object]]:
+    if not isinstance(results, tuple):
+        raise TypeError(
+            "results must be a tuple."
+        )
+
+    controls: dict[
+        str,
+        dict[str, object],
+    ] = {}
+
+    for result in results:
+        if not isinstance(
+            result,
+            CameraControlResult,
+        ):
+            raise TypeError(
+                "Every result must be "
+                "CameraControlResult."
+            )
+
+        if result.name in controls:
+            raise ValueError(
+                "Duplicate camera control result: "
+                f"{result.name}"
+            )
+
+        controls[result.name] = {
+            "property_id": result.property_id,
+            "requested": (
+                result.requested_value
+            ),
+            "effective": (
+                result.effective_value
+            ),
+            "applied": result.applied,
+            "verified": result.verified,
+            "matches_requested": (
+                result.matches_requested
+            ),
+        }
+
+    return controls

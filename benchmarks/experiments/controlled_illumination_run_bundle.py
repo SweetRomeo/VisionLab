@@ -1366,6 +1366,16 @@ class ControlledIlluminationExecutionSummary:
                 f"execution summary: {error}"
             ) from error
 
+        try:
+            validate_camera_capture_metadata(
+                self.camera_capture
+            )
+        except ValueError as error:
+            raise ControlledIlluminationRunBundleError(
+                "Invalid camera capture metadata in "
+                f"execution summary: {error}"
+            ) from error
+
         if (
             self.frame_results_file
             != FRAME_RESULTS_FILE_NAME

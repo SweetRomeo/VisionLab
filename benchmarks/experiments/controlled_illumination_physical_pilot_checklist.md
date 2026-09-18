@@ -30,43 +30,92 @@ python -m unittest discover \
 
 The working tree must be clean before the pilot begins.
 
-## 2. Camera-control profile
+## 2. Camera backend and control profile
 
-The physical pilot must use explicit camera controls.
+The physical pilot must use explicit camera controls appropriate to the selected camera backend.
 
-Do not invent camera-specific values in the repository.
+For Raspberry Pi 5 CSI-camera execution, use:
 
-Before execution, define real values supported by the selected camera
-for the required controlled settings:
+```text
+camera backend = picamera2
+platform = raspberry_pi
+architecture = pure_python
+```
 
-* Auto exposure state
-* Exposure
-* Gain
-* Auto white balance state
-* White-balance temperature
-* Autofocus state
-* Focus
+Picamera2/libcamera control units must not be treated as equivalent to OpenCV `VideoCapture` property values.
 
-Automatic exposure, white balance or focus must not remain enabled
-silently during a controlled-illumination run.
+The Raspberry Pi control profile may define:
 
-The requested values must be based on the real camera/backend being
-used for the pilot.
+```text
+AeEnable
+ExposureTime
+AnalogueGain
+AwbEnable
+ColourGains
+```
 
-OpenCV camera-property behavior is backend and device dependent.
-A successful `VideoCapture.set()` call does not by itself prove that
-the requested physical camera state was established.
+VisionLab represents these values through:
 
-Values used to disable automatic modes must therefore be validated on
-the actual camera/backend used for the pilot rather than assumed to be
-portable across devices.
+```text
+ae_enable
+exposure_time_us
+analogue_gain
+awb_enable
+colour_gains
+```
 
-## 3. Camera preflight
+Manual exposure or analogue gain requires:
 
-Run the camera preflight before creating any completed experiment
-artifacts.
+```text
+ae_enable = false
+```
 
-First inspect the available command-line controls:
+Manual colour gains require:
+
+```text
+awb_enable = false
+```
+
+Do not invent hardware-specific values in the repository.
+
+Determine the real values during physical preflight and record both requested and effective/read-back values.
+
+Controls that cannot be read back must be reported as unverifiable rather than silently treated as verified.
+
+OpenCV control behavior remains valid for the desktop/USB-camera backend and must not be translated directly into Picamera2 values.
+
+## 3. Raspberry Pi camera setup and preflight
+
+Use a current Raspberry Pi OS installation with the libcamera/rpicam camera stack.
+
+Update the operating system before the hardware pilot:
+
+```bash
+sudo apt update
+sudo apt full-upgrade
+```
+
+If Picamera2 is not already installed, install the headless-compatible package with:
+
+```bash
+sudo apt install -y python3-picamera2 --no-install-recommends
+```
+
+Confirm that the Raspberry Pi detects the attached camera:
+
+```bash
+rpicam-hello --list-cameras
+```
+
+Record the camera index shown by this command.
+
+Before running VisionLab, confirm that Picamera2 can be imported:
+
+```bash
+python3 -c "from picamera2 import Picamera2; print('Picamera2 available')"
+```
+
+Inspect the VisionLab preflight options:
 
 ```bash
 python -m \
@@ -74,31 +123,57 @@ benchmarks.experiments.controlled_illumination_camera_preflight \
 --help
 ```
 
-Then run the preflight with:
+A basic Raspberry Pi acquisition preflight is:
 
-* The physical camera index
-* Width `1280`
-* Height `720`
-* Target FPS `30`
-* The intended camera-control values
-* A finite positive sample-frame count
+```bash
+python -m \
+benchmarks.experiments.controlled_illumination_camera_preflight \
+--camera-backend picamera2 \
+--camera-index 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--sample-frames 30
+```
+
+Replace camera index `0` when `rpicam-hello --list-cameras` reports a different index.
+
+For controlled manual exposure and white balance, run the preflight using real values supported by the attached camera:
+
+```bash
+python -m \
+benchmarks.experiments.controlled_illumination_camera_preflight \
+--camera-backend picamera2 \
+--camera-index 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--sample-frames 30 \
+--ae-enable false \
+--exposure-time-us <EXPOSURE_TIME_US> \
+--analogue-gain <ANALOGUE_GAIN> \
+--awb-enable false \
+--colour-gains <RED_GAIN> <BLUE_GAIN>
+```
+
+Do not replace the placeholders until the actual camera has been inspected.
 
 The preflight must report:
 
+* Camera backend
 * Camera index
+* Camera model when available
 * Effective resolution
 * Effective FPS
 * Requested camera controls
+* Effective/read-back camera controls when available
 * Applied state
-* Effective/read-back values when available
 * Verification state
 * Sampled frame count
 
-The preflight must not write completed experiment artifacts.
+The preflight must create no completed experiment artifacts.
 
-Preflight success verifies camera configuration and acquisition
-behavior only. It does not replace physical geometry, lux or scene
-verification.
+A successful preflight verifies camera acquisition and camera-control behavior only. It does not replace physical geometry, illuminance or scene verification.
 
 ## 4. Preflight acceptance criteria
 
@@ -152,8 +227,10 @@ Run only a small physical pilot before the full 300-run dataset.
 
 Use:
 
-* Platform: `desktop`
+* Platform: `raspberry_pi`
+* Camera backend: picamera2
 * Architecture: `pure_python`
+* Camera index: the index validated during preflight
 * Resolution: `1280x720`
 * Target FPS: `30`
 * The controlled camera profile validated by preflight
@@ -191,10 +268,11 @@ execution_summary.json
 Confirm that `camera_controls` contains the controls used by the
 runtime.
 
-For each control, verify the recorded fields:
+For Picamera2 controls, verify the recorded fields:
 
 ```text
-property_id
+backend
+control_name
 requested
 effective
 applied
@@ -202,10 +280,37 @@ verified
 matches_requested
 ```
 
+For OpenCV controls, the existing backend-specific metadata fields,
+including `property_id`, remain valid.
+
 The values must reflect the actual runtime camera-control result.
 
 Requested values must not be treated as equivalent to effective values
 unless verification confirms the requested camera state.
+
+For Raspberry Pi Picamera2 runs, also confirm that `camera_capture`
+contains:
+
+```text
+backend
+camera_index
+camera_model
+requested_mode
+effective_mode
+```
+
+Confirm that both `requested_mode` and `effective_mode` contain:
+
+```text
+width
+height
+fps
+```
+
+The recorded camera index must match the camera used during the run.
+
+The recorded camera model must reflect the backend-reported value when
+available. It may be null when the camera model cannot be reported.
 
 ## 9. Run-metadata verification
 
@@ -222,10 +327,24 @@ Confirm that:
 
 ```text
 camera_settings.controls
+camera_settings.capture
 ```
 
-contains the same requested/effective camera-control information from
-the execution summary.
+contain the camera-control and physical capture information synchronized
+from the execution summary.
+
+For Raspberry Pi Picamera2 runs, `camera_settings.capture` must preserve:
+
+```text
+backend
+camera_index
+camera_model
+requested_mode
+effective_mode
+```
+
+The capture information in `run_metadata.json` must match the
+corresponding `camera_capture` information in `execution_summary.json`.
 
 The synchronization must occur before the final run-bundle artifact
 hashes are calculated.
@@ -240,12 +359,16 @@ Confirm that:
 * Execution-summary counts match the frame results.
 * Frame-result SHA-256 matches the execution summary.
 * Run metadata validates successfully.
-* Camera controls are present in run metadata for camera runs.
+* Camera controls are present in run metadata when controls were requested.
+* Raspberry Pi Picamera2 runs contain capture metadata in both
+  `execution_summary.camera_capture` and `camera_settings.capture`.
+* Requested and effective capture modes are preserved across the
+  execution summary and run metadata.
 * The run-bundle manifest hashes the final synchronized metadata file.
 * No temporary artifact files remain.
 
-Do not accept a pilot run whose finalized bundle fails integrity or
-cross-file validation.
+Do not accept a pilot run whose finalized bundle fails integrity,
+metadata validation or cross-file validation.
 
 ## 11. Quality-capture verification
 
@@ -330,6 +453,7 @@ pilot demonstrates all of the following:
 * Required-control failure prevents completed artifacts.
 * Camera resources are released on all paths.
 * Requested/effective controls propagate into run metadata.
+* Requested/effective camera capture metadata propagates into run metadata.
 * Finalized artifact hashes remain valid.
 * Quality-sample PNGs and manifest hashes are valid.
 * Optical-quality analysis completes successfully.

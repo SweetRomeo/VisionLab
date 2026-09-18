@@ -17,8 +17,10 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     validate_safe_identifier,
     validate_utc_timestamp,
     validate_camera_control_metadata,
+    validate_camera_capture_metadata,
     ControlledIlluminationRunMetadata,
     attach_camera_control_metadata,
+    attach_camera_capture_metadata,
     load_run_metadata,
     save_run_metadata_atomic,
 )
@@ -81,6 +83,7 @@ EXECUTION_SUMMARY_FIELDS = frozenset(
         "mean_processing_time_ms",
         "mean_end_to_end_latency_ms",
         "camera_controls",
+        "camera_capture",
         "frame_results_file",
         "frame_results_sha256",
     }
@@ -1195,6 +1198,7 @@ class ControlledIlluminationExecutionSummary:
         str,
         dict[str, object],
     ]
+    camera_capture: dict[str, object]
     frame_results_file: str
     frame_results_sha256: str
 
@@ -1362,6 +1366,16 @@ class ControlledIlluminationExecutionSummary:
                 f"execution summary: {error}"
             ) from error
 
+        try:
+            validate_camera_capture_metadata(
+                self.camera_capture
+            )
+        except ValueError as error:
+            raise ControlledIlluminationRunBundleError(
+                "Invalid camera capture metadata in "
+                f"execution summary: {error}"
+            ) from error
+
         if (
             self.frame_results_file
             != FRAME_RESULTS_FILE_NAME
@@ -1467,13 +1481,14 @@ def load_execution_summary(
         summary_value
     )
 
-def synchronize_camera_controls_into_run_metadata(
+def synchronize_camera_metadata_into_run_metadata(
     run_directory: str | Path,
     config: dict[str, Any],
 ) -> None:
     resolved_directory = resolve_run_directory(
         run_directory
     )
+
     metadata_path = (
         resolved_directory
         / RUN_METADATA_FILE_NAME
@@ -1483,7 +1498,10 @@ def synchronize_camera_controls_into_run_metadata(
         resolved_directory
     )
 
-    if not summary.camera_controls:
+    if (
+        not summary.camera_controls
+        and not summary.camera_capture
+    ):
         return
 
     try:
@@ -1492,21 +1510,33 @@ def synchronize_camera_controls_into_run_metadata(
             config=config,
         )
 
-        updated_metadata = (
-            attach_camera_control_metadata(
-                metadata,
-                summary.camera_controls,
+        updated_metadata = metadata
+
+        if summary.camera_controls:
+            updated_metadata = (
+                attach_camera_control_metadata(
+                    updated_metadata,
+                    summary.camera_controls,
+                )
             )
-        )
+
+        if summary.camera_capture:
+            updated_metadata = (
+                attach_camera_capture_metadata(
+                    updated_metadata,
+                    summary.camera_capture,
+                )
+            )
 
         save_run_metadata_atomic(
             updated_metadata,
             config=config,
             output_path=metadata_path,
         )
+
     except (OSError, ValueError) as error:
         raise ControlledIlluminationRunBundleError(
-            "Camera controls could not be "
+            "Camera metadata could not be "
             "synchronized into run metadata: "
             f"{error}"
         ) from error
@@ -1849,7 +1879,7 @@ def finalize_run_bundle_atomic(
         finalized_at_utc,
     )
 
-    synchronize_camera_controls_into_run_metadata(
+    synchronize_camera_metadata_into_run_metadata(
         run_directory,
         config,
     )

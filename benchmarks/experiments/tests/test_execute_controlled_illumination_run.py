@@ -519,5 +519,74 @@ class ExecuteControlledIlluminationRunTests(
                 )
             )
 
+    def test_raspberry_pi_run_selects_picamera2_camera_backend(
+            self,
+    ) -> None:
+        desktop_run = self.build_planned_run()
+
+        raspberry_pi_run = PlannedRun(
+            execution_order=(
+                desktop_run.execution_order
+            ),
+            experiment_id=(
+                desktop_run.experiment_id
+            ),
+            run_id=desktop_run.run_id,
+            phase=desktop_run.phase,
+            platform="raspberry_pi",
+            architecture=(
+                desktop_run.architecture
+            ),
+            algorithm=desktop_run.algorithm,
+            resolution=desktop_run.resolution,
+            trial_number=desktop_run.trial_number,
+            incidence_angle_degrees=(
+                desktop_run.incidence_angle_degrees
+            ),
+            target_illuminance_lux=(
+                desktop_run.target_illuminance_lux
+            ),
+            source_output_setting=(
+                desktop_run.source_output_setting
+            ),
+            target_fps=desktop_run.target_fps,
+            frame_deadline_ms=(
+                desktop_run.frame_deadline_ms
+            ),
+        )
+
+        environment = build_planned_run_environment(
+            raspberry_pi_run
+        )
+
+        self.assertEqual(
+            environment["VISIONLAB_PLATFORM"],
+            "raspberry_pi",
+        )
+        self.assertEqual(
+            environment["VISIONLAB_INPUT_SOURCE"],
+            "camera",
+        )
+        self.assertEqual(
+            environment["VISIONLAB_CAMERA_BACKEND"],
+            "picamera2",
+        )
+
+    def test_desktop_run_does_not_force_camera_backend(
+            self,
+    ) -> None:
+        environment = build_planned_run_environment(
+            self.build_planned_run()
+        )
+
+        self.assertNotIn(
+            "VISIONLAB_INPUT_SOURCE",
+            environment,
+        )
+        self.assertNotIn(
+            "VISIONLAB_CAMERA_BACKEND",
+            environment,
+        )
+
 if __name__ == "__main__":
     unittest.main()

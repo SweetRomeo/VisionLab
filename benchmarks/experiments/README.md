@@ -296,6 +296,142 @@ The full 300-run dataset must not begin until the camera preflight,
 required-control verification, pilot execution and finalized metadata
 checks in that checklist have passed.
 
+## Raspberry Pi 5 physical-camera execution
+
+VisionLab supports Raspberry Pi 5 CSI-camera execution through the
+Picamera2/libcamera backend.
+
+The Raspberry Pi execution path uses:
+
+```text
+platform = raspberry_pi
+architecture = pure_python
+input source = camera
+camera backend = picamera2
+```
+
+The dedicated pilot configuration is:
+
+```text
+benchmarks/experiments/config/controlled_illumination_raspberry_pi_pilot.json
+```
+
+This configuration is intentionally separate from the 300-run desktop
+optical-screening configuration.
+
+The Raspberry Pi pilot contains a single controlled-illumination run
+and is intended only for physical backend validation before larger
+experiment execution.
+
+Validate the pilot configuration without writing manifests:
+
+```bash
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--config \
+benchmarks/experiments/config/controlled_illumination_raspberry_pi_pilot.json \
+--experiment-id raspberry-pi-pilot-validation \
+--dry-run
+```
+
+Successful validation reports:
+
+```text
+Run count: 1
+Dry run: no manifest files written.
+```
+
+### Camera backend
+
+Raspberry Pi CSI cameras use the dedicated:
+
+```text
+picamera2
+```
+
+backend.
+
+Desktop and USB-camera execution continues to use:
+
+```text
+opencv
+```
+
+Do not translate OpenCV camera-property values directly into Picamera2
+control values. The two backends expose different control semantics
+and units.
+
+Picamera2 controlled-camera settings include:
+
+```text
+ae_enable
+exposure_time_us
+analogue_gain
+awb_enable
+colour_gains
+```
+
+Manual exposure or analogue gain requires automatic exposure to be
+explicitly disabled.
+
+Manual colour gains require automatic white balance to be explicitly
+disabled.
+
+### Raspberry Pi preflight
+
+Before executing the pilot, verify that the Raspberry Pi camera is
+detected:
+
+```bash
+rpicam-hello --list-cameras
+```
+
+Then run the VisionLab camera preflight:
+
+```bash
+python -m \
+benchmarks.experiments.controlled_illumination_camera_preflight \
+--camera-backend picamera2 \
+--camera-index 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--sample-frames 30
+```
+
+Use the actual camera index reported by the Raspberry Pi instead of
+assuming that index `0` is always correct.
+
+For controlled manual camera settings, supply the real values validated
+on the attached camera:
+
+```bash
+python -m \
+benchmarks.experiments.controlled_illumination_camera_preflight \
+--camera-backend picamera2 \
+--camera-index 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--sample-frames 30 \
+--ae-enable false \
+--exposure-time-us <EXPOSURE_TIME_US> \
+--analogue-gain <ANALOGUE_GAIN> \
+--awb-enable false \
+--colour-gains <RED_GAIN> <BLUE_GAIN>
+```
+
+Do not replace these placeholders with guessed values.
+
+The physical-pilot procedure and acceptance gate are documented in:
+
+```text
+benchmarks/experiments/controlled_illumination_physical_pilot_checklist.md
+```
+
+The preflight must complete without publishing completed experiment
+artifacts before the Raspberry Pi pilot run is attempted.
+
 ## Official experiment workflow
 
 For each official experiment run:
@@ -318,9 +454,16 @@ Official results must not be used when metadata validation fails.
 
 ## Current scope
 
-The current infrastructure supports configuration and metadata preparation on the desktop reference platform.
+The current infrastructure supports the desktop reference platform and
+Raspberry Pi 5 Pure Python physical-camera execution through the
+Picamera2 backend.
 
-Physical measurements, Raspberry Pi deployment, NVIDIA Jetson deployment, hardware-specific acceleration and final architecture selection remain separate future stages.
+Physical Raspberry Pi validation still requires completion of the
+documented hardware smoke test before results are treated as accepted
+pilot data.
+
+NVIDIA Jetson deployment, hardware-specific acceleration and final
+architecture selection remain separate future stages.
 
 ## Controlled-illumination run planning
 
@@ -329,12 +472,12 @@ configuration into an ordered and reproducible execution manifest.
 
 The planner:
 
-- Expands the complete experimental matrix.
-- Supports `constant_lux` and `constant_source` phases.
-- Randomizes execution order using the configured deterministic seed.
-- Assigns sequential execution numbers and unique run identifiers.
-- Rejects duplicate experimental conditions.
-- Writes each JSON and CSV manifest using atomic file replacement.
+* Expands the complete experimental matrix.
+* Supports `constant_lux` and `constant_source` phases.
+* Randomizes execution order using the configured deterministic seed.
+* Assigns sequential execution numbers and unique run identifiers.
+* Rejects duplicate experimental conditions.
+* Writes each JSON and CSV manifest using atomic file replacement.
 
 ### Optical-screening profile
 
@@ -812,14 +955,15 @@ Select a live camera through the Pure Python runner environment:
 {
   "environment": {
     "VISIONLAB_INPUT_SOURCE": "camera",
+    "VISIONLAB_CAMERA_BACKEND": "picamera2",
     "VISIONLAB_CAMERA_INDEX": "0"
   }
 }
 ```
 
-`VISIONLAB_CAMERA_INDEX` must contain a non-negative integer identifying
-the OpenCV capture device. It is required only when
-`VISIONLAB_INPUT_SOURCE=camera`.
+VISIONLAB_CAMERA_INDEX must contain a non-negative integer identifying
+the camera selected by the active camera backend. It is required only
+when VISIONLAB_INPUT_SOURCE=camera.
 
 The runner rejects unsupported input-source values, missing camera
 indices, negative indices and non-integer indices before starting the

@@ -11,13 +11,14 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     ControlledIlluminationRunMetadata,
     IlluminanceMeasurements,
     ResolutionMetadata,
+    attach_camera_control_metadata,
     create_unique_identifier,
     load_controlled_illumination_config,
     load_run_metadata,
     save_run_metadata_atomic,
+    validate_camera_capture_metadata,
     validate_controlled_illumination_config,
     validate_run_metadata,
-    attach_camera_control_metadata,
 )
 
 from benchmarks.experiments.generate_dry_run_metadata import (
@@ -457,6 +458,86 @@ class ControlledIlluminationMetadataTests(
             self.config,
         )
 
+    def test_picamera2_camera_control_metadata_is_valid(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "ae_enable": {
+                "backend": "picamera2",
+                "control_name": "AeEnable",
+                "requested": False,
+                "effective": False,
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            },
+            "exposure_time_us": {
+                "backend": "picamera2",
+                "control_name": "ExposureTime",
+                "requested": 10000,
+                "effective": 10000,
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            },
+            "colour_gains": {
+                "backend": "picamera2",
+                "control_name": "ColourGains",
+                "requested": (1.5, 1.7),
+                "effective": (1.5, 1.7),
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            },
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        validate_run_metadata(
+            metadata,
+            self.config,
+        )
+
+    def test_picamera2_colour_gains_require_two_values(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "colour_gains": {
+                "backend": "picamera2",
+                "control_name": "ColourGains",
+                "requested": (1.5,),
+                "effective": None,
+                "applied": True,
+                "verified": False,
+                "matches_requested": None,
+            }
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationMetadataError,
+                "exactly two values",
+        ):
+            validate_run_metadata(
+                metadata,
+                self.config,
+            )
+
     def test_verified_camera_control_requires_effective_value(
             self,
     ) -> None:
@@ -568,6 +649,51 @@ class ControlledIlluminationMetadataTests(
             updated_metadata,
             self.metadata,
         )
+
+    def test_picamera2_capture_metadata_is_valid(
+            self,
+    ) -> None:
+        validate_camera_capture_metadata(
+            {
+                "backend": "picamera2",
+                "camera_index": 0,
+                "camera_model": "imx708",
+                "requested_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 30.0,
+                },
+                "effective_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 29.97,
+                },
+            }
+        )
+
+    def test_picamera2_capture_metadata_rejects_invalid_mode(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationMetadataError,
+                "width, height and fps",
+        ):
+            validate_camera_capture_metadata(
+                {
+                    "backend": "picamera2",
+                    "camera_index": 0,
+                    "camera_model": None,
+                    "requested_mode": {
+                        "width": 1280,
+                        "height": 720,
+                    },
+                    "effective_mode": {
+                        "width": 1280,
+                        "height": 720,
+                        "fps": 30.0,
+                    },
+                }
+            )
 
 
 if __name__ == "__main__":

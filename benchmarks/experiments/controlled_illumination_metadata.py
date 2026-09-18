@@ -739,6 +739,164 @@ def require_finite_metadata_number(
         )
 
     return float(value)
+def _validate_picamera2_metadata_value(
+    value: Any,
+    field_name: str,
+    *,
+    allow_none: bool = False,
+) -> None:
+    if value is None:
+        if allow_none:
+            return
+
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} must not be null."
+        )
+
+    if isinstance(value, bool):
+        return
+
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    ):
+        return
+
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ControlledIlluminationMetadataError(
+                f"{field_name} must contain exactly "
+                "two values."
+            )
+
+        for item in value:
+            if (
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(float(item))
+            ):
+                raise ControlledIlluminationMetadataError(
+                    f"{field_name} values must be "
+                    "finite numbers."
+                )
+
+        return
+
+    raise ControlledIlluminationMetadataError(
+        f"{field_name} contains an unsupported value."
+    )
+
+def validate_camera_capture_metadata(
+    capture: dict[str, Any],
+) -> None:
+    if not isinstance(capture, dict):
+        raise ControlledIlluminationMetadataError(
+            "camera capture metadata must be an object."
+        )
+
+    if not capture:
+        return
+
+    required_fields = {
+        "backend",
+        "camera_index",
+        "camera_model",
+        "requested_mode",
+        "effective_mode",
+    }
+
+    if set(capture) != required_fields:
+        raise ControlledIlluminationMetadataError(
+            "Camera capture metadata fields "
+            "are invalid."
+        )
+
+    backend = capture["backend"]
+
+    if backend != "picamera2":
+        raise ControlledIlluminationMetadataError(
+            "Camera capture backend must be picamera2."
+        )
+
+    camera_index = capture["camera_index"]
+
+    if (
+        isinstance(camera_index, bool)
+        or not isinstance(camera_index, int)
+        or camera_index < 0
+    ):
+        raise ControlledIlluminationMetadataError(
+            "Camera capture camera_index must be "
+            "a non-negative integer."
+        )
+
+    camera_model = capture["camera_model"]
+
+    if (
+        camera_model is not None
+        and (
+            not isinstance(camera_model, str)
+            or not camera_model.strip()
+        )
+    ):
+        raise ControlledIlluminationMetadataError(
+            "Camera capture camera_model must be "
+            "a non-empty string or null."
+        )
+
+    def validate_mode(
+        mode: Any,
+        field_name: str,
+    ) -> None:
+        if (
+            not isinstance(mode, dict)
+            or set(mode)
+            != {"width", "height", "fps"}
+        ):
+            raise ControlledIlluminationMetadataError(
+                f"{field_name} must contain exactly "
+                "width, height and fps."
+            )
+
+        for dimension_name in (
+            "width",
+            "height",
+        ):
+            value = mode[dimension_name]
+
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
+                raise ControlledIlluminationMetadataError(
+                    f"{field_name}.{dimension_name} "
+                    "must be a positive integer."
+                )
+
+        fps = mode["fps"]
+
+        if (
+            isinstance(fps, bool)
+            or not isinstance(fps, (int, float))
+            or not math.isfinite(float(fps))
+            or fps <= 0
+        ):
+            raise ControlledIlluminationMetadataError(
+                f"{field_name}.fps must be a "
+                "positive finite number."
+            )
+
+    validate_mode(
+        capture["requested_mode"],
+        "camera_capture.requested_mode",
+    )
+
+    validate_mode(
+        capture["effective_mode"],
+        "camera_capture.effective_mode",
+    )
 
 def validate_camera_control_metadata(
     camera_settings: dict[str, Any],
@@ -755,8 +913,18 @@ def validate_camera_control_metadata(
             "camera_settings.controls must be an object."
         )
 
-    required_fields = {
+    opencv_required_fields = {
         "property_id",
+        "requested",
+        "effective",
+        "applied",
+        "verified",
+        "matches_requested",
+    }
+
+    picamera2_required_fields = {
+        "backend",
+        "control_name",
         "requested",
         "effective",
         "applied",
@@ -782,54 +950,117 @@ def validate_camera_control_metadata(
 
         actual_fields = set(control)
 
-        if actual_fields != required_fields:
+        is_opencv = (
+            actual_fields
+            == opencv_required_fields
+        )
+
+        is_picamera2 = (
+            actual_fields
+            == picamera2_required_fields
+        )
+
+        if not is_opencv and not is_picamera2:
             raise ControlledIlluminationMetadataError(
                 "Camera control metadata fields "
                 f"are invalid: {control_name}"
             )
 
-        property_id = control["property_id"]
+        if is_opencv:
+            property_id = control[
+                "property_id"
+            ]
 
-        if (
-            isinstance(property_id, bool)
-            or not isinstance(property_id, int)
-            or property_id < 0
-        ):
-            raise ControlledIlluminationMetadataError(
-                "Camera control property_id must "
-                f"be a non-negative integer: "
-                f"{control_name}"
+            if (
+                isinstance(property_id, bool)
+                or not isinstance(
+                    property_id,
+                    int,
+                )
+                or property_id < 0
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Camera control property_id must "
+                    "be a non-negative integer: "
+                    f"{control_name}"
+                )
+
+            requested = control["requested"]
+
+            if (
+                isinstance(requested, bool)
+                or not isinstance(
+                    requested,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(requested)
+                )
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Camera control requested value "
+                    "must be finite: "
+                    f"{control_name}"
+                )
+
+            effective = control["effective"]
+
+            if effective is not None and (
+                isinstance(effective, bool)
+                or not isinstance(
+                    effective,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(effective)
+                )
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Camera control effective value "
+                    "must be finite or null: "
+                    f"{control_name}"
+                )
+
+        else:
+            if control["backend"] != "picamera2":
+                raise ControlledIlluminationMetadataError(
+                    "Picamera2 camera control backend "
+                    "must be picamera2: "
+                    f"{control_name}"
+                )
+
+            backend_control_name = control[
+                "control_name"
+            ]
+
+            if (
+                not isinstance(
+                    backend_control_name,
+                    str,
+                )
+                or not backend_control_name.strip()
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Picamera2 control_name must be "
+                    "a non-empty string: "
+                    f"{control_name}"
+                )
+
+            _validate_picamera2_metadata_value(
+                control["requested"],
+                (
+                    "Picamera2 requested value: "
+                    f"{control_name}"
+                ),
             )
 
-        requested = control["requested"]
-
-        if (
-            isinstance(requested, bool)
-            or not isinstance(
-                requested,
-                (int, float),
-            )
-            or not math.isfinite(requested)
-        ):
-            raise ControlledIlluminationMetadataError(
-                "Camera control requested value "
-                f"must be finite: {control_name}"
-            )
-
-        effective = control["effective"]
-
-        if effective is not None and (
-            isinstance(effective, bool)
-            or not isinstance(
-                effective,
-                (int, float),
-            )
-            or not math.isfinite(effective)
-        ):
-            raise ControlledIlluminationMetadataError(
-                "Camera control effective value "
-                "must be finite or null: "
-                f"{control_name}"
+            _validate_picamera2_metadata_value(
+                control["effective"],
+                (
+                    "Picamera2 effective value: "
+                    f"{control_name}"
+                ),
+                allow_none=True,
             )
 
         applied = control["applied"]
@@ -863,7 +1094,9 @@ def validate_camera_control_metadata(
                 f"{control_name}"
             )
 
-        if verified and effective is None:
+        if verified and control[
+            "effective"
+        ] is None:
             raise ControlledIlluminationMetadataError(
                 "Verified camera control requires "
                 "an effective value: "
@@ -922,6 +1155,56 @@ def attach_camera_control_metadata(
 
     camera_settings["controls"] = (
         copied_controls
+    )
+
+    return replace(
+        metadata,
+        camera_settings=camera_settings,
+    )
+
+def attach_camera_capture_metadata(
+    metadata: ControlledIlluminationRunMetadata,
+    capture: dict[str, object],
+) -> ControlledIlluminationRunMetadata:
+    if not isinstance(
+        metadata,
+        ControlledIlluminationRunMetadata,
+    ):
+        raise TypeError(
+            "metadata must be "
+            "ControlledIlluminationRunMetadata."
+        )
+
+    if not isinstance(capture, dict):
+        raise TypeError(
+            "capture must be an object."
+        )
+
+    if not capture:
+        return metadata
+
+    validate_camera_capture_metadata(
+        capture
+    )
+
+    copied_capture = {
+        "backend": capture["backend"],
+        "camera_index": capture["camera_index"],
+        "camera_model": capture["camera_model"],
+        "requested_mode": dict(
+            capture["requested_mode"]
+        ),
+        "effective_mode": dict(
+            capture["effective_mode"]
+        ),
+    }
+
+    camera_settings = dict(
+        metadata.camera_settings
+    )
+
+    camera_settings["capture"] = (
+        copied_capture
     )
 
     return replace(
@@ -1199,6 +1482,17 @@ def validate_run_metadata(
     validate_camera_control_metadata(
         metadata.camera_settings
     )
+
+    camera_capture = (
+        metadata.camera_settings.get(
+            "capture"
+        )
+    )
+
+    if camera_capture is not None:
+        validate_camera_capture_metadata(
+            camera_capture
+        )
 
     for field_name, distance in (
         (

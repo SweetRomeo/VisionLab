@@ -162,6 +162,7 @@ The preflight must report:
 
 * Camera backend
 * Camera index
+* Camera model when available
 * Effective resolution
 * Effective FPS
 * Requested camera controls
@@ -229,6 +230,7 @@ Use:
 * Platform: `raspberry_pi`
 * Camera backend: picamera2
 * Architecture: `pure_python`
+* Camera index: the index validated during preflight
 * Resolution: `1280x720`
 * Target FPS: `30`
 * The controlled camera profile validated by preflight
@@ -266,10 +268,11 @@ execution_summary.json
 Confirm that `camera_controls` contains the controls used by the
 runtime.
 
-For each control, verify the recorded fields:
+For Picamera2 controls, verify the recorded fields:
 
 ```text
-property_id
+backend
+control_name
 requested
 effective
 applied
@@ -277,10 +280,37 @@ verified
 matches_requested
 ```
 
+For OpenCV controls, the existing backend-specific metadata fields,
+including `property_id`, remain valid.
+
 The values must reflect the actual runtime camera-control result.
 
 Requested values must not be treated as equivalent to effective values
 unless verification confirms the requested camera state.
+
+For Raspberry Pi Picamera2 runs, also confirm that `camera_capture`
+contains:
+
+```text
+backend
+camera_index
+camera_model
+requested_mode
+effective_mode
+```
+
+Confirm that both `requested_mode` and `effective_mode` contain:
+
+```text
+width
+height
+fps
+```
+
+The recorded camera index must match the camera used during the run.
+
+The recorded camera model must reflect the backend-reported value when
+available. It may be null when the camera model cannot be reported.
 
 ## 9. Run-metadata verification
 
@@ -297,10 +327,24 @@ Confirm that:
 
 ```text
 camera_settings.controls
+camera_settings.capture
 ```
 
-contains the same requested/effective camera-control information from
-the execution summary.
+contain the camera-control and physical capture information synchronized
+from the execution summary.
+
+For Raspberry Pi Picamera2 runs, `camera_settings.capture` must preserve:
+
+```text
+backend
+camera_index
+camera_model
+requested_mode
+effective_mode
+```
+
+The capture information in `run_metadata.json` must match the
+corresponding `camera_capture` information in `execution_summary.json`.
 
 The synchronization must occur before the final run-bundle artifact
 hashes are calculated.
@@ -315,12 +359,16 @@ Confirm that:
 * Execution-summary counts match the frame results.
 * Frame-result SHA-256 matches the execution summary.
 * Run metadata validates successfully.
-* Camera controls are present in run metadata for camera runs.
+* Camera controls are present in run metadata when controls were requested.
+* Raspberry Pi Picamera2 runs contain capture metadata in both
+  `execution_summary.camera_capture` and `camera_settings.capture`.
+* Requested and effective capture modes are preserved across the
+  execution summary and run metadata.
 * The run-bundle manifest hashes the final synchronized metadata file.
 * No temporary artifact files remain.
 
-Do not accept a pilot run whose finalized bundle fails integrity or
-cross-file validation.
+Do not accept a pilot run whose finalized bundle fails integrity,
+metadata validation or cross-file validation.
 
 ## 11. Quality-capture verification
 
@@ -405,6 +453,7 @@ pilot demonstrates all of the following:
 * Required-control failure prevents completed artifacts.
 * Camera resources are released on all paths.
 * Requested/effective controls propagate into run metadata.
+* Requested/effective camera capture metadata propagates into run metadata.
 * Finalized artifact hashes remain valid.
 * Quality-sample PNGs and manifest hashes are valid.
 * Optical-quality analysis completes successfully.

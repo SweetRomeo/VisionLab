@@ -955,14 +955,15 @@ Select a live camera through the Pure Python runner environment:
 {
   "environment": {
     "VISIONLAB_INPUT_SOURCE": "camera",
+    "VISIONLAB_CAMERA_BACKEND": "picamera2",
     "VISIONLAB_CAMERA_INDEX": "0"
   }
 }
 ```
 
-`VISIONLAB_CAMERA_INDEX` must contain a non-negative integer identifying
-the OpenCV capture device. It is required only when
-`VISIONLAB_INPUT_SOURCE=camera`.
+VISIONLAB_CAMERA_INDEX must contain a non-negative integer identifying
+the camera selected by the active camera backend. It is required only
+when VISIONLAB_INPUT_SOURCE=camera.
 
 The runner rejects unsupported input-source values, missing camera
 indices, negative indices and non-integer indices before starting the

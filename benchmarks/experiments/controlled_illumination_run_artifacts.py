@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from benchmarks.experiments.controlled_illumination_metadata import (
+    validate_camera_capture_metadata,
     validate_camera_control_metadata,
     validate_utc_timestamp,
 )
@@ -261,6 +262,9 @@ def write_completed_run_artifacts_atomic(
         dict[str, dict[str, object]]
         | None
     ) = None,
+    camera_capture: (
+        dict[str, object] | None
+    ) = None,
 ) -> tuple[Path, Path]:
     normalized_records = validate_frame_records(
         context,
@@ -275,6 +279,16 @@ def write_completed_run_artifacts_atomic(
             for name, control
             in camera_controls.items()
         }
+    )
+
+    normalized_camera_capture = (
+        {}
+        if camera_capture is None
+        else dict(camera_capture)
+    )
+
+    validate_camera_capture_metadata(
+        normalized_camera_capture
     )
 
     validate_camera_control_metadata(
@@ -437,6 +451,7 @@ def write_completed_run_artifacts_atomic(
         "camera_controls": (
             normalized_camera_controls
         ),
+        "camera_capture": {},
     }
 
     # Written last: its presence marks a complete run.

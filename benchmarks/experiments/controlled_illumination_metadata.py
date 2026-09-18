@@ -787,6 +787,116 @@ def _validate_picamera2_metadata_value(
         f"{field_name} contains an unsupported value."
     )
 
+def validate_camera_capture_metadata(
+    capture: dict[str, Any],
+) -> None:
+    if not isinstance(capture, dict):
+        raise ControlledIlluminationMetadataError(
+            "camera capture metadata must be an object."
+        )
+
+    if not capture:
+        return
+
+    required_fields = {
+        "backend",
+        "camera_index",
+        "camera_model",
+        "requested_mode",
+        "effective_mode",
+    }
+
+    if set(capture) != required_fields:
+        raise ControlledIlluminationMetadataError(
+            "Camera capture metadata fields "
+            "are invalid."
+        )
+
+    backend = capture["backend"]
+
+    if backend != "picamera2":
+        raise ControlledIlluminationMetadataError(
+            "Camera capture backend must be picamera2."
+        )
+
+    camera_index = capture["camera_index"]
+
+    if (
+        isinstance(camera_index, bool)
+        or not isinstance(camera_index, int)
+        or camera_index < 0
+    ):
+        raise ControlledIlluminationMetadataError(
+            "Camera capture camera_index must be "
+            "a non-negative integer."
+        )
+
+    camera_model = capture["camera_model"]
+
+    if (
+        camera_model is not None
+        and (
+            not isinstance(camera_model, str)
+            or not camera_model.strip()
+        )
+    ):
+        raise ControlledIlluminationMetadataError(
+            "Camera capture camera_model must be "
+            "a non-empty string or null."
+        )
+
+    def validate_mode(
+        mode: Any,
+        field_name: str,
+    ) -> None:
+        if (
+            not isinstance(mode, dict)
+            or set(mode)
+            != {"width", "height", "fps"}
+        ):
+            raise ControlledIlluminationMetadataError(
+                f"{field_name} must contain exactly "
+                "width, height and fps."
+            )
+
+        for dimension_name in (
+            "width",
+            "height",
+        ):
+            value = mode[dimension_name]
+
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+            ):
+                raise ControlledIlluminationMetadataError(
+                    f"{field_name}.{dimension_name} "
+                    "must be a positive integer."
+                )
+
+        fps = mode["fps"]
+
+        if (
+            isinstance(fps, bool)
+            or not isinstance(fps, (int, float))
+            or not math.isfinite(float(fps))
+            or fps <= 0
+        ):
+            raise ControlledIlluminationMetadataError(
+                f"{field_name}.fps must be a "
+                "positive finite number."
+            )
+
+    validate_mode(
+        capture["requested_mode"],
+        "camera_capture.requested_mode",
+    )
+
+    validate_mode(
+        capture["effective_mode"],
+        "camera_capture.effective_mode",
+    )
 
 def validate_camera_control_metadata(
     camera_settings: dict[str, Any],

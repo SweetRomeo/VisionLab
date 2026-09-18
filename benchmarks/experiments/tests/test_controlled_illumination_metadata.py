@@ -11,13 +11,14 @@ from benchmarks.experiments.controlled_illumination_metadata import (
     ControlledIlluminationRunMetadata,
     IlluminanceMeasurements,
     ResolutionMetadata,
+    attach_camera_control_metadata,
     create_unique_identifier,
     load_controlled_illumination_config,
     load_run_metadata,
     save_run_metadata_atomic,
+    validate_camera_capture_metadata,
     validate_controlled_illumination_config,
     validate_run_metadata,
-    attach_camera_control_metadata,
 )
 
 from benchmarks.experiments.generate_dry_run_metadata import (
@@ -648,6 +649,51 @@ class ControlledIlluminationMetadataTests(
             updated_metadata,
             self.metadata,
         )
+
+    def test_picamera2_capture_metadata_is_valid(
+            self,
+    ) -> None:
+        validate_camera_capture_metadata(
+            {
+                "backend": "picamera2",
+                "camera_index": 0,
+                "camera_model": "imx708",
+                "requested_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 30.0,
+                },
+                "effective_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 29.97,
+                },
+            }
+        )
+
+    def test_picamera2_capture_metadata_rejects_invalid_mode(
+            self,
+    ) -> None:
+        with self.assertRaisesRegex(
+                ControlledIlluminationMetadataError,
+                "width, height and fps",
+        ):
+            validate_camera_capture_metadata(
+                {
+                    "backend": "picamera2",
+                    "camera_index": 0,
+                    "camera_model": None,
+                    "requested_mode": {
+                        "width": 1280,
+                        "height": 720,
+                    },
+                    "effective_mode": {
+                        "width": 1280,
+                        "height": 720,
+                        "fps": 30.0,
+                    },
+                }
+            )
 
 
 if __name__ == "__main__":

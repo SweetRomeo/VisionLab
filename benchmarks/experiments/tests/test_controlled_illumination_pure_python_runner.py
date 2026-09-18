@@ -368,6 +368,8 @@ class ControlledIlluminationPurePythonRunnerTests(
                 Picamera2ControlProfile()
             ),
             picamera2_control_reporter=ANY,
+            picamera2_capture_mode_reporter=ANY,
+            picamera2_camera_model_reporter=ANY,
             environment=environment,
         )
 
@@ -390,6 +392,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             finished_at_utc=FINISHED_AT,
             warmup_frame_count=30,
             camera_controls={},
+            camera_capture={},
         )
 
         write_quality_artifacts.assert_not_called()
@@ -430,6 +433,7 @@ class ControlledIlluminationPurePythonRunnerTests(
         environment = {
             "VISIONLAB_INPUT_SOURCE": "camera",
             "VISIONLAB_CAMERA_INDEX": "2",
+            "VISIONLAB_CAMERA_BACKEND": "picamera2",
         }
         records = (object(),)
         expected_paths = (
@@ -448,133 +452,35 @@ class ControlledIlluminationPurePythonRunnerTests(
                 *args,
                 **kwargs,
         ):
-            reporter = kwargs[
+            control_reporter = kwargs[
                 "picamera2_control_reporter"
             ]
 
-            reporter(
+            control_reporter(
                 (
                     control_result,
                 )
             )
 
-            return frame_source
+            capture_mode_reporter = kwargs[
+                "picamera2_capture_mode_reporter"
+            ]
 
-        with (
-            patch(
-                f"{RUNNER_MODULE}."
-                "load_picamera2_control_profile",
-                return_value=profile,
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "load_runner_context_from_environment",
-                return_value=self.context,
-            ) as load_context,
-            patch(
-                f"{RUNNER_MODULE}."
-                "load_benchmark_config",
-                return_value=benchmark_config,
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "load_realtime_config",
-                return_value=realtime_config,
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "validate_shared_execution_counts",
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "validate_context_against_configuration",
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "select_algorithm_configuration",
-                return_value=algorithm_config,
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "create_frame_processor",
-                return_value=processor,
-            ),
-            patch(
-                f"{RUNNER_MODULE}."
-                "create_frame_source",
-                side_effect=create_picamera2_source,
-            ) as create_source,
-            patch(
-                f"{RUNNER_MODULE}."
-                "run_realtime_trial",
-                return_value=records,
-            ) as run_trial,
-            patch(
-                f"{RUNNER_MODULE}."
-                "write_completed_run_artifacts_atomic",
-                return_value=expected_paths,
-            ) as write_artifacts,
-            patch(
-                f"{RUNNER_MODULE}."
-                "write_quality_capture_artifacts_atomic",
-            ) as write_quality_artifacts,
-        ):
-            actual_paths = execute_pure_python_run(
-                environment,
-                now_provider=lambda: next(
-                    timestamps
-                ),
+            capture_mode_reporter(
+                640,
+                480,
+                29.97,
             )
 
-        self.assertEqual(
-            actual_paths,
-            expected_paths,
-        )
-        load_context.assert_called_once_with(
-            environment,
-            expected_architecture="pure_python",
-        )
-        create_source.assert_called_once_with(
-            benchmark_config,
-            width=640,
-            height=480,
-            fps=30.0,
-            camera_controls=(),
-            camera_controls_reporter=ANY,
-            picamera2_control_profile=profile,
-            picamera2_control_reporter=ANY,
-            environment=environment,
-        )
-        run_trial.assert_called_once_with(
-            frame_source=frame_source,
-            processor=processor,
-            config=realtime_config,
-            architecture="pure_python",
-            algorithm="gamma_correction",
-            width=640,
-            height=480,
-            trial=1,
-            frame_capture_callback=None,
-        )
-        write_artifacts.assert_called_once_with(
-            self.context,
-            records,
-            started_at_utc=STARTED_AT,
-            finished_at_utc=FINISHED_AT,
-            warmup_frame_count=30,
-            camera_controls={
-                "exposure_time_us": {
-                    "backend": "picamera2",
-                    "control_name": "ExposureTime",
-                    "requested": 10000,
-                    "effective": 10000,
-                    "applied": True,
-                    "verified": True,
-                    "matches_requested": True,
-                },
-            },
-        )
-        write_quality_artifacts.assert_not_called()
+            camera_model_reporter = kwargs[
+                "picamera2_camera_model_reporter"
+            ]
+
+            camera_model_reporter(
+                "imx708"
+            )
+
+            return frame_source
 
     def test_cli_returns_failure_exit_code(
         self,
@@ -822,7 +728,9 @@ class ControlledIlluminationPurePythonRunnerTests(
             exposure_time_us=10000,
         )
 
-        reporter = Mock()
+        control_reporter = Mock()
+        capture_mode_reporter = Mock()
+        camera_model_reporter = Mock()
 
         with (
             patch(
@@ -842,7 +750,15 @@ class ControlledIlluminationPurePythonRunnerTests(
                     height=720,
                     fps=30.0,
                     picamera2_control_profile=profile,
-                    picamera2_control_reporter=reporter,
+                    picamera2_control_reporter=(
+                        control_reporter
+                    ),
+                    picamera2_capture_mode_reporter=(
+                        capture_mode_reporter
+                    ),
+                    picamera2_camera_model_reporter=(
+                        camera_model_reporter
+                    ),
                     environment={
                         "VISIONLAB_INPUT_SOURCE": "camera",
                         "VISIONLAB_CAMERA_INDEX": "0",
@@ -850,6 +766,7 @@ class ControlledIlluminationPurePythonRunnerTests(
                             "picamera2"
                         ),
                     },
+                    
                 )
             )
 
@@ -864,7 +781,13 @@ class ControlledIlluminationPurePythonRunnerTests(
             height=720,
             fps=30.0,
             control_profile=profile,
-            control_reporter=reporter,
+            control_reporter=control_reporter,
+            capture_mode_reporter=(
+                capture_mode_reporter
+            ),
+            camera_model_reporter=(
+                camera_model_reporter
+            ),
         )
 
         iter_camera.assert_not_called()

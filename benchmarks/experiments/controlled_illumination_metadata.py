@@ -739,6 +739,54 @@ def require_finite_metadata_number(
         )
 
     return float(value)
+def _validate_picamera2_metadata_value(
+    value: Any,
+    field_name: str,
+    *,
+    allow_none: bool = False,
+) -> None:
+    if value is None:
+        if allow_none:
+            return
+
+        raise ControlledIlluminationMetadataError(
+            f"{field_name} must not be null."
+        )
+
+    if isinstance(value, bool):
+        return
+
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    ):
+        return
+
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ControlledIlluminationMetadataError(
+                f"{field_name} must contain exactly "
+                "two values."
+            )
+
+        for item in value:
+            if (
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(float(item))
+            ):
+                raise ControlledIlluminationMetadataError(
+                    f"{field_name} values must be "
+                    "finite numbers."
+                )
+
+        return
+
+    raise ControlledIlluminationMetadataError(
+        f"{field_name} contains an unsupported value."
+    )
+
 
 def validate_camera_control_metadata(
     camera_settings: dict[str, Any],
@@ -755,8 +803,18 @@ def validate_camera_control_metadata(
             "camera_settings.controls must be an object."
         )
 
-    required_fields = {
+    opencv_required_fields = {
         "property_id",
+        "requested",
+        "effective",
+        "applied",
+        "verified",
+        "matches_requested",
+    }
+
+    picamera2_required_fields = {
+        "backend",
+        "control_name",
         "requested",
         "effective",
         "applied",
@@ -782,54 +840,117 @@ def validate_camera_control_metadata(
 
         actual_fields = set(control)
 
-        if actual_fields != required_fields:
+        is_opencv = (
+            actual_fields
+            == opencv_required_fields
+        )
+
+        is_picamera2 = (
+            actual_fields
+            == picamera2_required_fields
+        )
+
+        if not is_opencv and not is_picamera2:
             raise ControlledIlluminationMetadataError(
                 "Camera control metadata fields "
                 f"are invalid: {control_name}"
             )
 
-        property_id = control["property_id"]
+        if is_opencv:
+            property_id = control[
+                "property_id"
+            ]
 
-        if (
-            isinstance(property_id, bool)
-            or not isinstance(property_id, int)
-            or property_id < 0
-        ):
-            raise ControlledIlluminationMetadataError(
-                "Camera control property_id must "
-                f"be a non-negative integer: "
-                f"{control_name}"
+            if (
+                isinstance(property_id, bool)
+                or not isinstance(
+                    property_id,
+                    int,
+                )
+                or property_id < 0
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Camera control property_id must "
+                    "be a non-negative integer: "
+                    f"{control_name}"
+                )
+
+            requested = control["requested"]
+
+            if (
+                isinstance(requested, bool)
+                or not isinstance(
+                    requested,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(requested)
+                )
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Camera control requested value "
+                    "must be finite: "
+                    f"{control_name}"
+                )
+
+            effective = control["effective"]
+
+            if effective is not None and (
+                isinstance(effective, bool)
+                or not isinstance(
+                    effective,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    float(effective)
+                )
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Camera control effective value "
+                    "must be finite or null: "
+                    f"{control_name}"
+                )
+
+        else:
+            if control["backend"] != "picamera2":
+                raise ControlledIlluminationMetadataError(
+                    "Picamera2 camera control backend "
+                    "must be picamera2: "
+                    f"{control_name}"
+                )
+
+            backend_control_name = control[
+                "control_name"
+            ]
+
+            if (
+                not isinstance(
+                    backend_control_name,
+                    str,
+                )
+                or not backend_control_name.strip()
+            ):
+                raise ControlledIlluminationMetadataError(
+                    "Picamera2 control_name must be "
+                    "a non-empty string: "
+                    f"{control_name}"
+                )
+
+            _validate_picamera2_metadata_value(
+                control["requested"],
+                (
+                    "Picamera2 requested value: "
+                    f"{control_name}"
+                ),
             )
 
-        requested = control["requested"]
-
-        if (
-            isinstance(requested, bool)
-            or not isinstance(
-                requested,
-                (int, float),
-            )
-            or not math.isfinite(requested)
-        ):
-            raise ControlledIlluminationMetadataError(
-                "Camera control requested value "
-                f"must be finite: {control_name}"
-            )
-
-        effective = control["effective"]
-
-        if effective is not None and (
-            isinstance(effective, bool)
-            or not isinstance(
-                effective,
-                (int, float),
-            )
-            or not math.isfinite(effective)
-        ):
-            raise ControlledIlluminationMetadataError(
-                "Camera control effective value "
-                "must be finite or null: "
-                f"{control_name}"
+            _validate_picamera2_metadata_value(
+                control["effective"],
+                (
+                    "Picamera2 effective value: "
+                    f"{control_name}"
+                ),
+                allow_none=True,
             )
 
         applied = control["applied"]
@@ -863,7 +984,9 @@ def validate_camera_control_metadata(
                 f"{control_name}"
             )
 
-        if verified and effective is None:
+        if verified and control[
+            "effective"
+        ] is None:
             raise ControlledIlluminationMetadataError(
                 "Verified camera control requires "
                 "an effective value: "

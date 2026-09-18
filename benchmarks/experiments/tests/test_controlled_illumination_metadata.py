@@ -457,6 +457,86 @@ class ControlledIlluminationMetadataTests(
             self.config,
         )
 
+    def test_picamera2_camera_control_metadata_is_valid(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "ae_enable": {
+                "backend": "picamera2",
+                "control_name": "AeEnable",
+                "requested": False,
+                "effective": False,
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            },
+            "exposure_time_us": {
+                "backend": "picamera2",
+                "control_name": "ExposureTime",
+                "requested": 10000,
+                "effective": 10000,
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            },
+            "colour_gains": {
+                "backend": "picamera2",
+                "control_name": "ColourGains",
+                "requested": (1.5, 1.7),
+                "effective": (1.5, 1.7),
+                "applied": True,
+                "verified": True,
+                "matches_requested": True,
+            },
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        validate_run_metadata(
+            metadata,
+            self.config,
+        )
+
+    def test_picamera2_colour_gains_require_two_values(
+            self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "colour_gains": {
+                "backend": "picamera2",
+                "control_name": "ColourGains",
+                "requested": (1.5,),
+                "effective": None,
+                "applied": True,
+                "verified": False,
+                "matches_requested": None,
+            }
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationMetadataError,
+                "exactly two values",
+        ):
+            validate_run_metadata(
+                metadata,
+                self.config,
+            )
+
     def test_verified_camera_control_requires_effective_value(
             self,
     ) -> None:

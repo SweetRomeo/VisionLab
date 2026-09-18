@@ -158,6 +158,7 @@ class ControlledIlluminationRunBundleTests(
             "mean_processing_time_ms": 5.0,
             "mean_end_to_end_latency_ms": 7.0,
             "camera_controls": {},
+            "camera_capture": {},
             "frame_results_file": (
                 FRAME_RESULTS_FILE_NAME
             ),
@@ -1333,6 +1334,78 @@ class ControlledIlluminationRunBundleTests(
                     "controls"
                 ],
                 camera_controls,
+            )
+
+    def test_finalization_synchronizes_camera_capture_into_metadata(
+            self,
+    ) -> None:
+        with TemporaryDirectory() as temporary:
+            run_directory = Path(temporary)
+
+            (
+                config,
+                _,
+                planned_run,
+                _,
+            ) = self.prepare_finalizable_run(
+                run_directory
+            )
+
+            camera_capture = {
+                "backend": "picamera2",
+                "camera_index": 0,
+                "camera_model": "imx708",
+                "requested_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 30.0,
+                },
+                "effective_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 29.97,
+                },
+            }
+
+            summary_path = (
+                    run_directory
+                    / EXECUTION_SUMMARY_FILE_NAME
+            )
+
+            summary_value = json.loads(
+                summary_path.read_text(
+                    encoding="utf-8",
+                )
+            )
+
+            summary_value[
+                "camera_capture"
+            ] = camera_capture
+
+            self.write_execution_summary(
+                run_directory,
+                summary_value,
+            )
+
+            finalize_run_bundle_atomic(
+                run_directory,
+                planned_run,
+                config,
+                VALID_PLAN_SHA256,
+                "2026-08-26T11:00:00Z",
+            )
+
+            updated_metadata = load_run_metadata(
+                run_directory
+                / RUN_METADATA_FILE_NAME,
+                config=config,
+            )
+
+            self.assertEqual(
+                updated_metadata.camera_settings[
+                    "capture"
+                ],
+                camera_capture,
             )
 
     def test_manifest_hash_includes_synchronized_metadata(

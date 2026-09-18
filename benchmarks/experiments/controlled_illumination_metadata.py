@@ -1162,6 +1162,56 @@ def attach_camera_control_metadata(
         camera_settings=camera_settings,
     )
 
+def attach_camera_capture_metadata(
+    metadata: ControlledIlluminationRunMetadata,
+    capture: dict[str, object],
+) -> ControlledIlluminationRunMetadata:
+    if not isinstance(
+        metadata,
+        ControlledIlluminationRunMetadata,
+    ):
+        raise TypeError(
+            "metadata must be "
+            "ControlledIlluminationRunMetadata."
+        )
+
+    if not isinstance(capture, dict):
+        raise TypeError(
+            "capture must be an object."
+        )
+
+    if not capture:
+        return metadata
+
+    validate_camera_capture_metadata(
+        capture
+    )
+
+    copied_capture = {
+        "backend": capture["backend"],
+        "camera_index": capture["camera_index"],
+        "camera_model": capture["camera_model"],
+        "requested_mode": dict(
+            capture["requested_mode"]
+        ),
+        "effective_mode": dict(
+            capture["effective_mode"]
+        ),
+    }
+
+    camera_settings = dict(
+        metadata.camera_settings
+    )
+
+    camera_settings["capture"] = (
+        copied_capture
+    )
+
+    return replace(
+        metadata,
+        camera_settings=camera_settings,
+    )
+
 def validate_run_metadata(
     metadata: ControlledIlluminationRunMetadata,
     config: dict[str, Any],
@@ -1432,6 +1482,17 @@ def validate_run_metadata(
     validate_camera_control_metadata(
         metadata.camera_settings
     )
+
+    camera_capture = (
+        metadata.camera_settings.get(
+            "capture"
+        )
+    )
+
+    if camera_capture is not None:
+        validate_camera_capture_metadata(
+            camera_capture
+        )
 
     for field_name, distance in (
         (

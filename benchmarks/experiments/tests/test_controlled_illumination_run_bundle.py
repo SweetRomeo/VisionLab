@@ -2144,5 +2144,36 @@ class ControlledIlluminationRunBundleTests(
                 skipped_summary,
             )
 
+    def test_invalid_camera_capture_is_rejected(
+            self,
+    ) -> None:
+        summary_value = (
+            self.create_execution_summary_value()
+        )
+
+        summary_value["camera_capture"] = {
+            "backend": "picamera2",
+            "camera_index": -1,
+            "camera_model": "imx708",
+            "requested_mode": {
+                "width": 1280,
+                "height": 720,
+                "fps": 30.0,
+            },
+            "effective_mode": {
+                "width": 1280,
+                "height": 720,
+                "fps": 30.0,
+            },
+        }
+
+        with self.assertRaisesRegex(
+                ControlledIlluminationRunBundleError,
+                "Invalid camera capture metadata",
+        ):
+            execution_summary_from_dict(
+                summary_value
+            )
+
 if __name__ == "__main__":
     unittest.main()

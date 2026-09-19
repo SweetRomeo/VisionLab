@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import math
+from collections.abc import Callable, Iterator
+from fractions import Fraction
+from typing import Any
+
+import cv2
+import numpy as np
+
+
+class JetsonCameraError(RuntimeError):
+    """Raised when the Jetson camera backend cannot operate."""
+
+
+def _validate_camera_index(
+    camera_index: int,
+) -> None:
+    if (
+        isinstance(camera_index, bool)
+        or not isinstance(camera_index, int)
+        or camera_index < 0
+    ):
+        raise ValueError(
+            "camera_index must be a "
+            "non-negative integer."
+        )
+
+
+def _validate_capture_mode(
+    width: int,
+    height: int,
+    fps: float,
+) -> None:
+    for field_name, value in (
+        ("width", width),
+        ("height", height),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value <= 0
+        ):
+            raise ValueError(
+                f"{field_name} must be a "
+                "positive integer."
+            )
+
+    if (
+        isinstance(fps, bool)
+        or not isinstance(fps, (int, float))
+        or not math.isfinite(float(fps))
+        or fps <= 0
+    ):
+        raise ValueError(
+            "fps must be a positive finite number."
+        )
+
+
+def build_jetson_gstreamer_pipeline(
+    camera_index: int,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+) -> str:
+    _validate_camera_index(camera_index)
+    _validate_capture_mode(
+        width,
+        height,
+        fps,
+    )
+
+    fps_fraction = Fraction(
+        float(fps)
+    ).limit_denominator(1000)
+
+    return (
+        f"nvarguscamerasrc sensor-id={camera_index} ! "
+        "video/x-raw(memory:NVMM), "
+        f"width=(int){width}, "
+        f"height=(int){height}, "
+        "format=(string)NV12, "
+        f"framerate=(fraction)"
+        f"{fps_fraction.numerator}/"
+        f"{fps_fraction.denominator} ! "
+        "nvvidconv ! "
+        "video/x-raw, format=(string)BGRx ! "
+        "videoconvert ! "
+        "video/x-raw, format=(string)BGR ! "
+        "appsink drop=true sync=false"
+    )
+
+
+def iter_jetson_gstreamer_frames(
+    camera_index: int,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+    capture_factory: (
+        Callable[[str, int], Any] | None
+    ) = None,
+) -> Iterator[np.ndarray]:
+    pipeline = build_jetson_gstreamer_pipeline(
+        camera_index,
+        width=width,
+        height=height,
+        fps=fps,
+    )
+
+    factory = (
+        cv2.VideoCapture
+        if capture_factory is None
+        else capture_factory
+    )
+
+    capture = factory(
+        pipeline,
+        cv2.CAP_GSTREAMER,
+    )
+
+    try:
+        if not capture.isOpened():
+            raise JetsonCameraError(
+                "Jetson GStreamer camera "
+                f"{camera_index} could not be opened."
+            )
+
+        while True:
+            frame_received, frame = capture.read()
+
+            if not frame_received:
+                raise JetsonCameraError(
+                    "Jetson GStreamer camera "
+                    "frame acquisition failed."
+                )
+
+            if (
+                not isinstance(frame, np.ndarray)
+                or frame.size == 0
+            ):
+                raise JetsonCameraError(
+                    "Jetson GStreamer camera "
+                    "returned an empty frame."
+                )
+
+            if (
+                frame.ndim != 3
+                or frame.shape[2] != 3
+            ):
+                raise JetsonCameraError(
+                    "Jetson GStreamer camera "
+                    "must return HxWx3 frames."
+                )
+
+            if frame.dtype != np.uint8:
+                raise JetsonCameraError(
+                    "Jetson GStreamer camera "
+                    "must return uint8 frames."
+                )
+
+            if (
+                frame.shape[1] != width
+                or frame.shape[0] != height
+            ):
+                raise JetsonCameraError(
+                    "Jetson GStreamer camera frame "
+                    "dimensions do not match the "
+                    "requested capture mode."
+                )
+
+            yield frame
+
+    finally:
+        capture.release()

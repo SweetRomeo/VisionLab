@@ -206,6 +206,52 @@ class ExecuteControlledIlluminationRunTests(
             "",
         )
 
+    def test_jetson_planned_run_uses_gstreamer_camera_backend(
+            self,
+    ) -> None:
+        planned_run = replace(
+            self.build_planned_run(),
+            platform="nvidia_jetson",
+        )
+
+        environment = build_planned_run_environment(
+            planned_run
+        )
+
+        self.assertEqual(
+            environment["VISIONLAB_PLATFORM"],
+            "nvidia_jetson",
+        )
+        self.assertEqual(
+            environment["VISIONLAB_INPUT_SOURCE"],
+            "camera",
+        )
+        self.assertEqual(
+            environment["VISIONLAB_CAMERA_BACKEND"],
+            "jetson_gstreamer",
+        )
+
+    def test_raspberry_pi_planned_run_uses_picamera2_backend(
+            self,
+    ) -> None:
+        planned_run = replace(
+            self.build_planned_run(),
+            platform="raspberry_pi",
+        )
+
+        environment = build_planned_run_environment(
+            planned_run
+        )
+
+        self.assertEqual(
+            environment["VISIONLAB_INPUT_SOURCE"],
+            "camera",
+        )
+        self.assertEqual(
+            environment["VISIONLAB_CAMERA_BACKEND"],
+            "picamera2",
+        )
+
     def test_runner_config_requires_all_architectures(
         self,
     ) -> None:

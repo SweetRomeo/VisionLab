@@ -816,6 +816,81 @@ class ControlledIlluminationPurePythonRunnerTests(
 
         iter_picamera2.assert_not_called()
 
+    def test_jetson_backend_uses_gstreamer_frame_source(
+        self,
+    ) -> None:
+        frame_source = object()
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_jetson_gstreamer_frames",
+                return_value=frame_source,
+            ) as iter_jetson,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+            ) as iter_camera,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_picamera2_frames",
+            ) as iter_picamera2,
+        ):
+            selected_source = (
+                pure_python_runner.create_frame_source(
+                    {},
+                    width=1280,
+                    height=720,
+                    fps=30.0,
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "1",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "jetson_gstreamer"
+                        ),
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_jetson.assert_called_once_with(
+            1,
+            width=1280,
+            height=720,
+            fps=30.0,
+        )
+
+        iter_camera.assert_not_called()
+        iter_picamera2.assert_not_called()
+
+    def test_jetson_backend_requires_capture_mode(
+        self,
+    ) -> None:
+        with patch(
+            f"{RUNNER_MODULE}."
+            "iter_jetson_gstreamer_frames",
+        ) as iter_jetson:
+            with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "requires width, height, and fps",
+            ):
+                pure_python_runner.create_frame_source(
+                    {},
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "0",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "jetson_gstreamer"
+                        ),
+                    },
+                )
+
+        iter_jetson.assert_not_called()
+
     def test_invalid_camera_index_configuration_is_rejected(
         self,
     ) -> None:

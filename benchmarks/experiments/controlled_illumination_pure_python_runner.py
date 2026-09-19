@@ -60,6 +60,9 @@ from benchmarks.realtime.picamera2_controls import (
     picamera2_control_results_to_metadata,
     validate_picamera2_control_profile,
 )
+from benchmarks.realtime.jetson_camera import (
+    iter_jetson_gstreamer_frames,
+)
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -78,6 +81,9 @@ CAMERA_BACKEND_VARIABLE = (
 
 OPENCV_CAMERA_BACKEND = "opencv"
 PICAMERA2_CAMERA_BACKEND = "picamera2"
+JETSON_GSTREAMER_CAMERA_BACKEND = (
+    "jetson_gstreamer"
+)
 EXPERIMENT_CONFIG_VARIABLE = (
     "VISIONLAB_EXPERIMENT_CONFIG"
 )
@@ -433,8 +439,8 @@ def create_frame_source(
         )
 
         if (
-                not isinstance(raw_camera_backend, str)
-                or not raw_camera_backend.strip()
+            not isinstance(raw_camera_backend, str)
+            or not raw_camera_backend.strip()
         ):
             raise ControlledIlluminationPurePythonRunnerError(
                 f"{CAMERA_BACKEND_VARIABLE} must contain "
@@ -459,9 +465,9 @@ def create_frame_source(
 
         if camera_backend == PICAMERA2_CAMERA_BACKEND:
             if (
-                    width is None
-                    or height is None
-                    or fps is None
+                width is None
+                or height is None
+                or fps is None
             ):
                 raise ControlledIlluminationPurePythonRunnerError(
                     "Picamera2 camera backend requires "
@@ -485,6 +491,27 @@ def create_frame_source(
                 camera_model_reporter=(
                     picamera2_camera_model_reporter
                 ),
+            )
+
+        if (
+            camera_backend
+            == JETSON_GSTREAMER_CAMERA_BACKEND
+        ):
+            if (
+                width is None
+                or height is None
+                or fps is None
+            ):
+                raise ControlledIlluminationPurePythonRunnerError(
+                    "Jetson GStreamer camera backend "
+                    "requires width, height, and fps."
+                )
+
+            return iter_jetson_gstreamer_frames(
+                camera_index,
+                width=width,
+                height=height,
+                fps=fps,
             )
 
         raise ControlledIlluminationPurePythonRunnerError(

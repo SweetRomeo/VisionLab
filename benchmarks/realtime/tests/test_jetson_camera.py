@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import unittest
+from unittest.mock import Mock
+
+import numpy as np
+
+from benchmarks.realtime.jetson_camera import (
+    JetsonCameraError,
+    build_jetson_gstreamer_pipeline,
+    iter_jetson_gstreamer_frames,
+)
+
+
+class JetsonCameraTests(unittest.TestCase):
+    def test_build_pipeline_contains_requested_mode(
+        self,
+    ) -> None:
+        pipeline = build_jetson_gstreamer_pipeline(
+            1,
+            width=1280,
+            height=720,
+            fps=30.0,
+        )
+
+        self.assertIn(
+            "nvarguscamerasrc sensor-id=1",
+            pipeline,
+        )
+        self.assertIn(
+            "width=(int)1280",
+            pipeline,
+        )
+        self.assertIn(
+            "height=(int)720",
+            pipeline,
+        )
+        self.assertIn(
+            "framerate=(fraction)30/1",
+            pipeline,
+        )
+        self.assertIn(
+            "format=(string)BGR",
+            pipeline,
+        )
+        self.assertIn(
+            "appsink",
+            pipeline,
+        )
+
+    def test_invalid_camera_index_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "camera_index",
+        ):
+            build_jetson_gstreamer_pipeline(
+                -1,
+                width=1280,
+                height=720,
+                fps=30.0,
+            )
+
+    def test_frames_are_yielded_and_capture_released(
+        self,
+    ) -> None:
+        frame = np.zeros(
+            (720, 1280, 3),
+            dtype=np.uint8,
+        )
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            frame,
+        )
+
+        capture_factory = Mock(
+            return_value=capture
+        )
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            capture_factory=capture_factory,
+        )
+
+        received_frame = next(frame_source)
+        frame_source.close()
+
+        self.assertIs(
+            received_frame,
+            frame,
+        )
+        capture.release.assert_called_once()
+
+    def test_camera_open_failure_releases_capture(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = False
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            capture_factory=lambda *_: capture,
+        )
+
+        with self.assertRaisesRegex(
+            JetsonCameraError,
+            "could not be opened",
+        ):
+            next(frame_source)
+
+        capture.release.assert_called_once()
+
+    def test_empty_frame_is_rejected(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            None,
+        )
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            capture_factory=lambda *_: capture,
+        )
+
+        with self.assertRaisesRegex(
+            JetsonCameraError,
+            "empty frame",
+        ):
+            next(frame_source)
+
+        capture.release.assert_called_once()
+
+    def test_wrong_dimensions_are_rejected(
+        self,
+    ) -> None:
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            np.zeros(
+                (480, 640, 3),
+                dtype=np.uint8,
+            ),
+        )
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            capture_factory=lambda *_: capture,
+        )
+
+        with self.assertRaisesRegex(
+            JetsonCameraError,
+            "dimensions",
+        ):
+            next(frame_source)
+
+        capture.release.assert_called_once()

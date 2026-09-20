@@ -8,6 +8,11 @@ from typing import Any
 import cv2
 import numpy as np
 
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
+    serialize_jetson_source_properties,
+)
+
 
 class JetsonCameraError(RuntimeError):
     """Raised when the Jetson camera backend cannot operate."""
@@ -63,6 +68,9 @@ def build_jetson_gstreamer_pipeline(
     width: int,
     height: int,
     fps: float,
+    control_profile: (
+        JetsonControlProfile | None
+    ) = None,
 ) -> str:
     _validate_camera_index(camera_index)
     _validate_capture_mode(
@@ -75,8 +83,29 @@ def build_jetson_gstreamer_pipeline(
         float(fps)
     ).limit_denominator(1000)
 
+    active_control_profile = (
+        JetsonControlProfile()
+        if control_profile is None
+        else control_profile
+    )
+
+    source_properties = (
+        serialize_jetson_source_properties(
+            active_control_profile
+        )
+    )
+
+    source = (
+        f"nvarguscamerasrc sensor-id={camera_index}"
+    )
+
+    if source_properties:
+        source = (
+            f"{source} {source_properties}"
+        )
+
     return (
-        f"nvarguscamerasrc sensor-id={camera_index} ! "
+        f"{source} ! "
         "video/x-raw(memory:NVMM), "
         f"width=(int){width}, "
         f"height=(int){height}, "
@@ -98,6 +127,9 @@ def iter_jetson_gstreamer_frames(
     width: int,
     height: int,
     fps: float,
+    control_profile: (
+        JetsonControlProfile | None
+    ) = None,
     capture_mode_reporter: (
         Callable[[int, int, float], None]
         | None
@@ -111,6 +143,7 @@ def iter_jetson_gstreamer_frames(
         width=width,
         height=height,
         fps=fps,
+        control_profile=control_profile,
     )
 
     if (

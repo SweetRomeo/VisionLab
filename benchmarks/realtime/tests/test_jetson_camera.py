@@ -12,6 +12,10 @@ from benchmarks.realtime.jetson_camera import (
     iter_jetson_gstreamer_frames,
 )
 
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
+)
+
 
 class JetsonCameraTests(unittest.TestCase):
     def test_build_pipeline_contains_requested_mode(
@@ -251,3 +255,92 @@ class JetsonCameraTests(unittest.TestCase):
 
         reporter.assert_not_called()
         capture.release.assert_called_once()
+
+    def test_pipeline_contains_jetson_control_properties(
+        self,
+    ) -> None:
+        profile = JetsonControlProfile(
+            ae_lock=True,
+            exposure_time_ns=5_000_000,
+            gain=2.5,
+            awb_lock=False,
+            wb_mode=1,
+        )
+
+        pipeline = build_jetson_gstreamer_pipeline(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            control_profile=profile,
+        )
+
+        self.assertIn(
+            "aelock=true",
+            pipeline,
+        )
+        self.assertIn(
+            'exposuretimerange="5000000 5000000"',
+            pipeline,
+        )
+        self.assertIn(
+            'gainrange="2.5 2.5"',
+            pipeline,
+        )
+        self.assertIn(
+            "awblock=false",
+            pipeline,
+        )
+        self.assertIn(
+            "wbmode=1",
+            pipeline,
+        )
+
+    def test_frame_source_forwards_control_profile(
+        self,
+    ) -> None:
+        frame = np.zeros(
+            (720, 1280, 3),
+            dtype=np.uint8,
+        )
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            frame,
+        )
+
+        capture_factory = Mock(
+            return_value=capture
+        )
+
+        profile = JetsonControlProfile(
+            ae_lock=True,
+            exposure_time_ns=5_000_000,
+        )
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            control_profile=profile,
+            capture_factory=capture_factory,
+        )
+
+        next(frame_source)
+        frame_source.close()
+
+        pipeline = (
+            capture_factory.call_args.args[0]
+        )
+
+        self.assertIn(
+            "aelock=true",
+            pipeline,
+        )
+        self.assertIn(
+            'exposuretimerange="5000000 5000000"',
+            pipeline,
+        )

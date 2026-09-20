@@ -21,13 +21,20 @@ from benchmarks.realtime.picamera2_controls import (
     Picamera2ControlResult,
     validate_picamera2_control_profile,
 )
+from benchmarks.realtime.jetson_camera import (
+    iter_jetson_gstreamer_frames,
+)
 
 
 OPENCV_CAMERA_BACKEND = "opencv"
 PICAMERA2_CAMERA_BACKEND = "picamera2"
+JETSON_GSTREAMER_CAMERA_BACKEND = (
+    "jetson_gstreamer"
+)
 
 DESKTOP_PLATFORM = "desktop"
 RASPBERRY_PI_PLATFORM = "raspberry_pi"
+NVIDIA_JETSON_PLATFORM = "nvidia_jetson"
 
 
 @dataclass(frozen=True)
@@ -152,6 +159,22 @@ def run_camera_preflight(
             ),
         )
 
+    elif (
+        camera_backend
+        == JETSON_GSTREAMER_CAMERA_BACKEND
+    ):
+        platform = NVIDIA_JETSON_PLATFORM
+
+        frame_source = iter_jetson_gstreamer_frames(
+            camera_index,
+            width=width,
+            height=height,
+            fps=fps,
+            capture_mode_reporter=(
+                report_capture_mode
+            ),
+        )
+
     else:
         raise ValueError(
             "Unsupported camera backend: "
@@ -210,6 +233,7 @@ def create_argument_parser() -> (
         choices=(
             OPENCV_CAMERA_BACKEND,
             PICAMERA2_CAMERA_BACKEND,
+            JETSON_GSTREAMER_CAMERA_BACKEND,
         ),
         default=OPENCV_CAMERA_BACKEND,
     )
@@ -379,7 +403,10 @@ def run_cli(
                 )
             )
 
-        else:
+        elif (
+            parsed_arguments.camera_backend
+            == PICAMERA2_CAMERA_BACKEND
+        ):
             colour_gains = None
 
             if (

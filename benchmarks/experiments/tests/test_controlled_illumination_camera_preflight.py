@@ -24,6 +24,10 @@ from benchmarks.realtime.picamera2_controls import (
     Picamera2ControlResult,
 )
 
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
+)
+
 PREFLIGHT_MODULE = (
     "benchmarks.experiments."
     "controlled_illumination_camera_preflight"
@@ -215,6 +219,7 @@ class ControlledIlluminationCameraPreflightTests(
             sample_frames=3,
             camera_controls=(),
             picamera2_control_profile=None,
+            jetson_control_profile=None,
         )
 
         output = captured_output.getvalue()
@@ -682,6 +687,7 @@ class ControlledIlluminationCameraPreflightTests(
             width=1280,
             height=720,
             fps=30.0,
+            control_profile=None,
             capture_mode_reporter=ANY,
         )
 
@@ -705,6 +711,10 @@ class ControlledIlluminationCameraPreflightTests(
                 camera_controls=(),
             )
         )
+
+        jetson_control_profile = (
+            JetsonControlProfile()
+        ),
 
         with patch(
             f"{PREFLIGHT_MODULE}."
@@ -742,6 +752,9 @@ class ControlledIlluminationCameraPreflightTests(
             sample_frames=30,
             camera_controls=(),
             picamera2_control_profile=None,
+            jetson_control_profile=(
+                JetsonControlProfile()
+            ),
         )
 
     def test_unsupported_camera_backend_is_rejected(
@@ -828,6 +841,7 @@ class ControlledIlluminationCameraPreflightTests(
             picamera2_control_profile=(
                 Picamera2ControlProfile()
             ),
+            jetson_control_profile=None,
         )
 
     def test_cli_routes_picamera2_controls(
@@ -902,6 +916,7 @@ class ControlledIlluminationCameraPreflightTests(
                     ),
                 )
             ),
+            jetson_control_profile=None,
         )
 
     def test_cli_rejects_picamera2_manual_exposure_without_ae_disabled(
@@ -941,6 +956,80 @@ class ControlledIlluminationCameraPreflightTests(
         self.assertIn(
             "ae_enable",
             captured_error.getvalue(),
+        )
+
+    def test_cli_routes_jetson_controls(
+        self,
+    ) -> None:
+        result = (
+            camera_preflight.CameraPreflightResult(
+                platform="nvidia_jetson",
+                camera_backend="jetson_gstreamer",
+                camera_index=0,
+                camera_model=None,
+                effective_width=1280,
+                effective_height=720,
+                effective_fps=30.0,
+                sampled_frame_count=1,
+                camera_controls=(),
+            )
+        )
+
+        with patch(
+            f"{PREFLIGHT_MODULE}."
+            "run_camera_preflight",
+            return_value=result,
+        ) as run_preflight:
+            exit_code = camera_preflight.run_cli(
+                [
+                    "--camera-backend",
+                    "jetson_gstreamer",
+                    "--camera-index",
+                    "0",
+                    "--width",
+                    "1280",
+                    "--height",
+                    "720",
+                    "--fps",
+                    "30",
+                    "--sample-frames",
+                    "1",
+                    "--jetson-ae-lock",
+                    "true",
+                    "--jetson-exposure-time-ns",
+                    "5000000",
+                    "--jetson-gain",
+                    "2.5",
+                    "--jetson-awb-lock",
+                    "false",
+                    "--jetson-wb-mode",
+                    "1",
+                ]
+            )
+
+        self.assertEqual(
+            exit_code,
+            0,
+        )
+
+        run_preflight.assert_called_once_with(
+            camera_backend="jetson_gstreamer",
+            camera_index=0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            sample_frames=1,
+            camera_controls=(),
+            picamera2_control_profile=None,
+            jetson_control_profile=(
+                JetsonControlProfile(
+                    ae_lock=True,
+                    exposure_time_ns=5_000_000,
+                    gain=2.5,
+                    awb_lock=False,
+                    wb_mode=1,
+                )
+            ),
         )
 
 if __name__ == "__main__":

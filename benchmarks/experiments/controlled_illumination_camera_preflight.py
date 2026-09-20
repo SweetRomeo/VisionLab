@@ -24,6 +24,10 @@ from benchmarks.realtime.picamera2_controls import (
 from benchmarks.realtime.jetson_camera import (
     iter_jetson_gstreamer_frames,
 )
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
+    validate_jetson_control_profile,
+)
 
 
 OPENCV_CAMERA_BACKEND = "opencv"
@@ -67,6 +71,9 @@ def run_camera_preflight(
     ] = (),
     picamera2_control_profile: (
         Picamera2ControlProfile | None
+    ) = None,
+    jetson_control_profile: (
+        JetsonControlProfile | None
     ) = None,
 ) -> CameraPreflightResult:
     if (
@@ -170,6 +177,9 @@ def run_camera_preflight(
             width=width,
             height=height,
             fps=fps,
+            control_profile=(
+                jetson_control_profile
+            ),
             capture_mode_reporter=(
                 report_capture_mode
             ),
@@ -345,6 +355,47 @@ def create_argument_parser() -> (
         nargs=2,
     )
 
+    # NVIDIA Jetson controls.
+
+    parser.add_argument(
+        "--jetson-ae-lock",
+        type=lambda value: (
+            value.lower() == "true"
+            if value.lower() in ("true", "false")
+            else parser.error(
+                "--jetson-ae-lock must be "
+                "true or false."
+            )
+        ),
+    )
+
+    parser.add_argument(
+        "--jetson-exposure-time-ns",
+        type=int,
+    )
+
+    parser.add_argument(
+        "--jetson-gain",
+        type=float,
+    )
+
+    parser.add_argument(
+        "--jetson-awb-lock",
+        type=lambda value: (
+            value.lower() == "true"
+            if value.lower() in ("true", "false")
+            else parser.error(
+                "--jetson-awb-lock must be "
+                "true or false."
+            )
+        ),
+    )
+
+    parser.add_argument(
+        "--jetson-wb-mode",
+        type=int,
+    )
+
     return parser
 
 
@@ -364,6 +415,8 @@ def run_cli(
         ] = ()
 
         picamera2_control_profile = None
+
+        jetson_control_profile = None
 
         if (
             parsed_arguments.camera_backend
@@ -441,6 +494,35 @@ def run_cli(
                 picamera2_control_profile
             )
 
+        elif (
+            parsed_arguments.camera_backend
+            == JETSON_GSTREAMER_CAMERA_BACKEND
+        ):
+            jetson_control_profile = (
+                JetsonControlProfile(
+                    ae_lock=(
+                        parsed_arguments.jetson_ae_lock
+                    ),
+                    exposure_time_ns=(
+                        parsed_arguments
+                        .jetson_exposure_time_ns
+                    ),
+                    gain=(
+                        parsed_arguments.jetson_gain
+                    ),
+                    awb_lock=(
+                        parsed_arguments.jetson_awb_lock
+                    ),
+                    wb_mode=(
+                        parsed_arguments.jetson_wb_mode
+                    ),
+                )
+            )
+
+            validate_jetson_control_profile(
+                jetson_control_profile
+            )
+
         result = run_camera_preflight(
             camera_backend=(
                 parsed_arguments.camera_backend
@@ -459,6 +541,9 @@ def run_cli(
             ),
             picamera2_control_profile=(
                 picamera2_control_profile
+            ),
+            jetson_control_profile=(
+                jetson_control_profile
             ),
         )
 

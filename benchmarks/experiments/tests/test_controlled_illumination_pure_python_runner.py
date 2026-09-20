@@ -19,6 +19,7 @@ from benchmarks.experiments.controlled_illumination_pure_python_runner import (
     run_cli,
     select_algorithm_configuration,
     validate_context_against_configuration,
+    load_jetson_control_profile,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
     PlannedRun,
@@ -43,6 +44,10 @@ from benchmarks.realtime.camera_controls import (
 from benchmarks.realtime.picamera2_controls import (
     Picamera2ControlProfile,
     Picamera2ControlResult,
+)
+
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
 )
 
 RUNNER_MODULE = (
@@ -362,6 +367,9 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
+            jetson_control_profile=(
+                JetsonControlProfile()
+            ),
             camera_controls=(),
             camera_controls_reporter=ANY,
             picamera2_control_profile=(
@@ -975,6 +983,10 @@ class ControlledIlluminationPurePythonRunnerTests(
     ) -> None:
         frame_source = object()
         capture_mode_reporter = Mock()
+        profile = JetsonControlProfile(
+            ae_lock=True,
+            exposure_time_ns=5_000_000,
+        )
 
         with (
             patch(
@@ -997,6 +1009,7 @@ class ControlledIlluminationPurePythonRunnerTests(
                     width=1280,
                     height=720,
                     fps=30.0,
+                    jetson_control_profile=profile,
                     jetson_capture_mode_reporter=(
                         capture_mode_reporter
                     ),
@@ -1015,11 +1028,14 @@ class ControlledIlluminationPurePythonRunnerTests(
             frame_source,
         )
 
+
+
         iter_jetson.assert_called_once_with(
             1,
             width=1280,
             height=720,
             fps=30.0,
+            control_profile=profile,
             capture_mode_reporter=(
                 capture_mode_reporter
             ),
@@ -2028,6 +2044,74 @@ class ControlledIlluminationPurePythonRunnerTests(
                         "colour_gains": [
                             1.5,
                         ],
+                    }
+                }
+            )
+
+    def test_missing_jetson_control_profile_returns_empty_profile(
+        self,
+    ) -> None:
+        profile = load_jetson_control_profile(
+            {}
+        )
+
+        self.assertEqual(
+            profile,
+            JetsonControlProfile(),
+        )
+
+    def test_jetson_control_profile_is_loaded(
+        self,
+    ) -> None:
+        profile = load_jetson_control_profile(
+            {
+                "jetson_control_profile": {
+                    "ae_lock": True,
+                    "exposure_time_ns": 5_000_000,
+                    "gain": 2.5,
+                    "awb_lock": False,
+                    "wb_mode": 1,
+                }
+            }
+        )
+
+        self.assertEqual(
+            profile,
+            JetsonControlProfile(
+                ae_lock=True,
+                exposure_time_ns=5_000_000,
+                gain=2.5,
+                awb_lock=False,
+                wb_mode=1,
+            ),
+        )
+
+    def test_unknown_jetson_control_profile_field_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ControlledIlluminationPurePythonRunnerError,
+            "Unsupported Jetson control profile fields",
+        ):
+            load_jetson_control_profile(
+                {
+                    "jetson_control_profile": {
+                        "unsupported": 1,
+                    }
+                }
+            )
+
+    def test_invalid_jetson_control_profile_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ControlledIlluminationPurePythonRunnerError,
+            "Invalid jetson_control_profile",
+        ):
+            load_jetson_control_profile(
+                {
+                    "jetson_control_profile": {
+                        "gain": -1.0,
                     }
                 }
             )

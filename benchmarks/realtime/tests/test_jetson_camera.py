@@ -14,6 +14,7 @@ from benchmarks.realtime.jetson_camera import (
 
 from benchmarks.realtime.jetson_controls import (
     JetsonControlProfile,
+    JetsonControlResult,
 )
 
 
@@ -344,3 +345,80 @@ class JetsonCameraTests(unittest.TestCase):
             'exposuretimerange="5000000 5000000"',
             pipeline,
         )
+
+    def test_applied_controls_are_reported_after_open(
+        self,
+    ) -> None:
+        frame = np.zeros(
+            (720, 1280, 3),
+            dtype=np.uint8,
+        )
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            frame,
+        )
+
+        reporter = Mock()
+
+        profile = JetsonControlProfile(
+            ae_lock=True,
+            gain=2.5,
+        )
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            control_profile=profile,
+            control_reporter=reporter,
+            capture_factory=lambda *_: capture,
+        )
+
+        next(frame_source)
+        frame_source.close()
+
+        reporter.assert_called_once_with(
+            (
+                JetsonControlResult(
+                    name="ae_lock",
+                    control_name="aelock",
+                    requested_value=True,
+                    applied=True,
+                    effective_value=None,
+                    verified=False,
+                    matches_requested=None,
+                ),
+                JetsonControlResult(
+                    name="gain",
+                    control_name="gainrange",
+                    requested_value=2.5,
+                    applied=True,
+                    effective_value=None,
+                    verified=False,
+                    matches_requested=None,
+                ),
+            )
+        )
+
+    def test_invalid_control_reporter_is_rejected(
+        self,
+    ) -> None:
+        frame_source = (
+            iter_jetson_gstreamer_frames(
+                0,
+                width=1280,
+                height=720,
+                fps=30.0,
+                control_reporter="invalid",
+            )
+        )
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "control_reporter must be callable",
+        ):
+            next(frame_source)

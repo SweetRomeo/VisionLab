@@ -10,6 +10,8 @@ import numpy as np
 
 from benchmarks.realtime.jetson_controls import (
     JetsonControlProfile,
+    JetsonControlResult,
+    create_applied_jetson_control_results,
     serialize_jetson_source_properties,
 )
 
@@ -130,6 +132,18 @@ def iter_jetson_gstreamer_frames(
     control_profile: (
         JetsonControlProfile | None
     ) = None,
+    control_reporter: (
+        Callable[
+            [
+                tuple[
+                    JetsonControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
+        | None
+    ) = None,
     capture_mode_reporter: (
         Callable[[int, int, float], None]
         | None
@@ -154,6 +168,14 @@ def iter_jetson_gstreamer_frames(
             "capture_mode_reporter must be callable."
         )
 
+    if (
+        control_reporter is not None
+        and not callable(control_reporter)
+    ):
+        raise TypeError(
+            "control_reporter must be callable."
+        )
+
     factory = (
         cv2.VideoCapture
         if capture_factory is None
@@ -172,6 +194,19 @@ def iter_jetson_gstreamer_frames(
             raise JetsonCameraError(
                 "Jetson GStreamer camera "
                 f"{camera_index} could not be opened."
+            )
+
+        if control_reporter is not None:
+            active_control_profile = (
+                JetsonControlProfile()
+                if control_profile is None
+                else control_profile
+            )
+
+            control_reporter(
+                create_applied_jetson_control_results(
+                    active_control_profile
+                )
             )
 
         while True:

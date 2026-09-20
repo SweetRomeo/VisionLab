@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import Mock
 
 import numpy as np
+import cv2
 
 from benchmarks.realtime.jetson_camera import (
     JetsonCameraError,
@@ -173,4 +174,80 @@ class JetsonCameraTests(unittest.TestCase):
         ):
             next(frame_source)
 
+        capture.release.assert_called_once()
+
+    def test_effective_capture_mode_is_reported(
+        self,
+    ) -> None:
+        frame = np.zeros(
+            (720, 1280, 3),
+            dtype=np.uint8,
+        )
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            frame,
+        )
+        capture.get.return_value = 29.97
+
+        reporter = Mock()
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            capture_mode_reporter=reporter,
+            capture_factory=lambda *_: capture,
+        )
+
+        next(frame_source)
+        frame_source.close()
+
+        reporter.assert_called_once_with(
+            1280,
+            720,
+            29.97,
+        )
+
+        capture.get.assert_called_once_with(
+            cv2.CAP_PROP_FPS
+        )
+
+    def test_invalid_effective_fps_is_rejected(
+        self,
+    ) -> None:
+        frame = np.zeros(
+            (720, 1280, 3),
+            dtype=np.uint8,
+        )
+
+        capture = Mock()
+        capture.isOpened.return_value = True
+        capture.read.return_value = (
+            True,
+            frame,
+        )
+        capture.get.return_value = 0.0
+
+        reporter = Mock()
+
+        frame_source = iter_jetson_gstreamer_frames(
+            0,
+            width=1280,
+            height=720,
+            fps=30.0,
+            capture_mode_reporter=reporter,
+            capture_factory=lambda *_: capture,
+        )
+
+        with self.assertRaisesRegex(
+            JetsonCameraError,
+            "effective FPS",
+        ):
+            next(frame_source)
+
+        reporter.assert_not_called()
         capture.release.assert_called_once()

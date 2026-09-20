@@ -98,6 +98,10 @@ def iter_jetson_gstreamer_frames(
     width: int,
     height: int,
     fps: float,
+    capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
     capture_factory: (
         Callable[[str, int], Any] | None
     ) = None,
@@ -109,6 +113,14 @@ def iter_jetson_gstreamer_frames(
         fps=fps,
     )
 
+    if (
+        capture_mode_reporter is not None
+        and not callable(capture_mode_reporter)
+    ):
+        raise TypeError(
+            "capture_mode_reporter must be callable."
+        )
+
     factory = (
         cv2.VideoCapture
         if capture_factory is None
@@ -119,6 +131,8 @@ def iter_jetson_gstreamer_frames(
         pipeline,
         cv2.CAP_GSTREAMER,
     )
+
+    capture_mode_reported = False
 
     try:
         if not capture.isOpened():
@@ -169,6 +183,38 @@ def iter_jetson_gstreamer_frames(
                     "dimensions do not match the "
                     "requested capture mode."
                 )
+
+            if (
+                capture_mode_reporter is not None
+                and not capture_mode_reported
+            ):
+                effective_fps = capture.get(
+                    cv2.CAP_PROP_FPS
+                )
+
+                if (
+                    isinstance(effective_fps, bool)
+                    or not isinstance(
+                        effective_fps,
+                        (int, float),
+                    )
+                    or not math.isfinite(
+                        float(effective_fps)
+                    )
+                    or effective_fps <= 0
+                ):
+                    raise JetsonCameraError(
+                        "Jetson GStreamer effective FPS "
+                        "could not be determined."
+                    )
+
+                capture_mode_reporter(
+                    int(frame.shape[1]),
+                    int(frame.shape[0]),
+                    float(effective_fps),
+                )
+
+                capture_mode_reported = True
 
             yield frame
 

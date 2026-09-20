@@ -695,6 +695,27 @@ class ControlledIlluminationMetadataTests(
                 }
             )
 
+    def test_jetson_capture_metadata_is_valid(
+        self,
+    ) -> None:
+        validate_camera_capture_metadata(
+            {
+                "backend": "jetson_gstreamer",
+                "camera_index": 0,
+                "camera_model": None,
+                "requested_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 30.0,
+                },
+                "effective_mode": {
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 29.97,
+                },
+            }
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

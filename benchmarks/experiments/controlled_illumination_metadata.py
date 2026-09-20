@@ -814,9 +814,14 @@ def validate_camera_capture_metadata(
 
     backend = capture["backend"]
 
-    if backend != "picamera2":
+    supported_backends = {
+        "picamera2",
+        "jetson_gstreamer",
+    }
+
+    if backend not in supported_backends:
         raise ControlledIlluminationMetadataError(
-            "Camera capture backend must be picamera2."
+            "Camera capture backend is unsupported."
         )
 
     camera_index = capture["camera_index"]

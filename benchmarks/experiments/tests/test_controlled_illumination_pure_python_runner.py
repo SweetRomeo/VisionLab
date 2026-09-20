@@ -1028,14 +1028,13 @@ class ControlledIlluminationPurePythonRunnerTests(
             frame_source,
         )
 
-
-
         iter_jetson.assert_called_once_with(
             1,
             width=1280,
             height=720,
             fps=30.0,
             control_profile=profile,
+            control_reporter=ANY,
             capture_mode_reporter=(
                 capture_mode_reporter
             ),

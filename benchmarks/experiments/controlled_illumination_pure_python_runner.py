@@ -65,6 +65,8 @@ from benchmarks.realtime.jetson_camera import (
 )
 from benchmarks.realtime.jetson_controls import (
     JetsonControlProfile,
+    JetsonControlResult,
+    jetson_control_results_to_metadata,
     validate_jetson_control_profile,
 )
 
@@ -416,34 +418,46 @@ def create_frame_source(
     picamera2_control_profile: (
         Picamera2ControlProfile | None
     ) = None,
-    jetson_control_profile: (
-            JetsonControlProfile | None
-    ) = None,
-        picamera2_control_reporter: (
-                Callable[
-                    [
-                        tuple[
-                            Picamera2ControlResult,
-                            ...,
-                        ]
-                    ],
-                    None,
+    picamera2_control_reporter: (
+        Callable[
+            [
+                tuple[
+                    Picamera2ControlResult,
+                    ...,
                 ]
-                | None
-        ) = None,
-        picamera2_capture_mode_reporter: (
-                Callable[[int, int, float], None]
-                | None
-        ) = None,
-        picamera2_camera_model_reporter: (
-                Callable[[str | None], None]
-                | None
-        ) = None,
-        jetson_capture_mode_reporter: (
-                Callable[[int, int, float], None]
-                | None
-        ) = None,
-        environment: Mapping[str, str] | None = None,
+            ],
+            None,
+        ]
+        | None
+    ) = None,
+    picamera2_capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
+    picamera2_camera_model_reporter: (
+        Callable[[str | None], None]
+        | None
+    ) = None,
+    jetson_control_profile: (
+        JetsonControlProfile | None
+    ) = None,
+    jetson_control_reporter: (
+        Callable[
+            [
+                tuple[
+                    JetsonControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
+        | None
+    ) = None,
+    jetson_capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Any:
     active_environment = (
         os.environ
@@ -594,6 +608,9 @@ def create_frame_source(
                 control_profile=(
                     jetson_control_profile
                 ),
+                control_reporter=(
+                    jetson_control_reporter
+                ),
                 capture_mode_reporter=(
                     jetson_capture_mode_reporter
                 ),
@@ -738,6 +755,11 @@ def execute_pure_python_run(
         ...,
     ] = ()
 
+    effective_jetson_controls: tuple[
+        JetsonControlResult,
+        ...,
+    ] = ()
+
     effective_picamera2_capture_mode: (
         tuple[int, int, float] | None
     ) = None
@@ -769,6 +791,16 @@ def execute_pure_python_run(
         nonlocal effective_picamera2_controls
 
         effective_picamera2_controls = results
+
+        jetson_control_profile = (
+            jetson_control_profile
+        ),
+        jetson_control_reporter = (
+            report_jetson_controls
+        ),
+        jetson_capture_mode_reporter = (
+            report_jetson_capture_mode
+        ),
 
     def report_picamera2_capture_mode(
         width: int,
@@ -894,12 +926,20 @@ def execute_pure_python_run(
         ),
     )
 
-    if effective_picamera2_controls:
+    if effective_jetson_controls:
+        camera_controls_metadata = (
+            jetson_control_results_to_metadata(
+                effective_jetson_controls
+            )
+        )
+
+    elif effective_picamera2_controls:
         camera_controls_metadata = (
             picamera2_control_results_to_metadata(
                 effective_picamera2_controls
             )
         )
+
     else:
         camera_controls_metadata = (
             camera_control_results_to_metadata(

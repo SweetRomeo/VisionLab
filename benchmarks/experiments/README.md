@@ -432,6 +432,105 @@ benchmarks/experiments/controlled_illumination_physical_pilot_checklist.md
 The preflight must complete without publishing completed experiment
 artifacts before the Raspberry Pi pilot run is attempted.
 
+## NVIDIA Jetson physical-camera execution
+
+VisionLab supports NVIDIA Jetson CSI-camera execution through the
+Argus/GStreamer backend.
+The Jetson execution path uses:
+```text
+platform = nvidia_jetson
+architecture = pure_python
+input source = camera
+camera backend = jetson_gstreamer
+```
+The dedicated pilot configuration is:
+```text
+benchmarks/experiments/config/controlled_illumination_nvidia_jetson_pilot.json
+```
+This pilot configuration contains a single physical-camera validation
+run and is intentionally separate from the full optical-screening
+dataset.
+Validate the Jetson pilot configuration without writing manifests:
+```text
+python -m \
+benchmarks.experiments.generate_controlled_illumination_run_plan \
+--config \
+benchmarks/experiments/config/controlled_illumination_nvidia_jetson_pilot.json \
+--experiment-id nvidia-jetson-pilot-validation \
+--dry-run
+```
+Successful validation reports:
+```text
+Run count: 1
+Dry run: no manifest files written.
+```
+
+## Jetson camera backend
+
+Jetson CSI-camera execution uses:
+```text
+jetson_gstreamer
+```
+The backend builds an NVIDIA Argus/GStreamer pipeline using
+nvarguscamerasrc.
+Jetson camera-control settings may include:
+```text
+ae_lock
+exposure_time_ns
+gain
+awb_lock
+wb_mode
+```
+These values must not be treated as equivalent to OpenCV or Picamera2
+camera-control values.
+Hardware-specific exposure, gain and white-balance values must be
+determined using the actual attached camera and Jetson software stack.
+Do not add guessed values to the pilot configuration.
+Controls passed through the GStreamer source are recorded as applied
+when the camera pipeline opens successfully. When the backend cannot
+read the effective sensor value back, the result is recorded as
+unverified instead of assuming that the requested value became the
+effective value.
+
+## NVIDIA Jetson preflight
+
+Before running the physical pilot, confirm that the Jetson camera stack
+and CSI camera operate correctly.
+Run the VisionLab Jetson camera preflight:
+```text
+python -m \
+benchmarks.experiments.controlled_illumination_camera_preflight \
+--camera-backend jetson_gstreamer \
+--camera-index 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--sample-frames 30
+```
+Use the actual sensor index supported by the connected Jetson camera
+setup.
+For controlled camera settings, supply only values verified on the
+physical device:
+```text
+python -m \
+benchmarks.experiments.controlled_illumination_camera_preflight \
+--camera-backend jetson_gstreamer \
+--camera-index 0 \
+--width 1280 \
+--height 720 \
+--fps 30 \
+--sample-frames 30 \
+--jetson-ae-lock true \
+--jetson-exposure-time-ns <EXPOSURE_TIME_NS> \
+--jetson-gain <GAIN> \
+--jetson-awb-lock true \
+--jetson-wb-mode <WB_MODE>
+```
+Do not replace these placeholders with guessed values.
+A successful Jetson preflight must report the effective capture mode,
+sample the requested frame count and create no completed experiment
+artifacts.
+
 ## Official experiment workflow
 
 For each official experiment run:

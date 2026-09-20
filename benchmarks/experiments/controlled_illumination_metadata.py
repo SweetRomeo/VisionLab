@@ -814,9 +814,14 @@ def validate_camera_capture_metadata(
 
     backend = capture["backend"]
 
-    if backend != "picamera2":
+    supported_backends = {
+        "picamera2",
+        "jetson_gstreamer",
+    }
+
+    if backend not in supported_backends:
         raise ControlledIlluminationMetadataError(
-            "Camera capture backend must be picamera2."
+            "Camera capture backend is unsupported."
         )
 
     camera_index = capture["camera_index"]
@@ -1022,10 +1027,15 @@ def validate_camera_control_metadata(
                 )
 
         else:
-            if control["backend"] != "picamera2":
+            backend = control["backend"]
+
+            if backend not in {
+                "picamera2",
+                "jetson_gstreamer",
+            }:
                 raise ControlledIlluminationMetadataError(
-                    "Picamera2 camera control backend "
-                    "must be picamera2: "
+                    "Camera control backend is "
+                    "unsupported: "
                     f"{control_name}"
                 )
 
@@ -1041,7 +1051,7 @@ def validate_camera_control_metadata(
                 or not backend_control_name.strip()
             ):
                 raise ControlledIlluminationMetadataError(
-                    "Picamera2 control_name must be "
+                    "Camera control_name must be "
                     "a non-empty string: "
                     f"{control_name}"
                 )
@@ -1049,7 +1059,7 @@ def validate_camera_control_metadata(
             _validate_picamera2_metadata_value(
                 control["requested"],
                 (
-                    "Picamera2 requested value: "
+                    "Camera requested value: "
                     f"{control_name}"
                 ),
             )
@@ -1057,7 +1067,7 @@ def validate_camera_control_metadata(
             _validate_picamera2_metadata_value(
                 control["effective"],
                 (
-                    "Picamera2 effective value: "
+                    "Camera effective value: "
                     f"{control_name}"
                 ),
                 allow_none=True,

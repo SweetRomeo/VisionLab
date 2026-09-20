@@ -24,6 +24,14 @@ from benchmarks.experiments.controlled_illumination_run_planner import (
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNNER_CONFIG_SCHEMA_VERSION = 1
 
+RASPBERRY_PI_PLATFORM = "raspberry_pi"
+NVIDIA_JETSON_PLATFORM = "nvidia_jetson"
+
+PICAMERA2_CAMERA_BACKEND = "picamera2"
+JETSON_GSTREAMER_CAMERA_BACKEND = (
+    "jetson_gstreamer"
+)
+
 
 def current_utc_timestamp() -> str:
     return (
@@ -207,14 +215,23 @@ def build_planned_run_environment(
         ),
     }
 
-    if planned_run.platform == "raspberry_pi":
+    if planned_run.platform == RASPBERRY_PI_PLATFORM:
         environment[
             "VISIONLAB_INPUT_SOURCE"
         ] = "camera"
 
         environment[
             "VISIONLAB_CAMERA_BACKEND"
-        ] = "picamera2"
+        ] = PICAMERA2_CAMERA_BACKEND
+
+    elif planned_run.platform == NVIDIA_JETSON_PLATFORM:
+        environment[
+            "VISIONLAB_INPUT_SOURCE"
+        ] = "camera"
+
+        environment[
+            "VISIONLAB_CAMERA_BACKEND"
+        ] = JETSON_GSTREAMER_CAMERA_BACKEND
 
     return environment
 

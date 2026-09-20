@@ -19,6 +19,7 @@ from benchmarks.experiments.controlled_illumination_pure_python_runner import (
     run_cli,
     select_algorithm_configuration,
     validate_context_against_configuration,
+    load_jetson_control_profile,
 )
 from benchmarks.experiments.controlled_illumination_run_planner import (
     PlannedRun,
@@ -43,6 +44,11 @@ from benchmarks.realtime.camera_controls import (
 from benchmarks.realtime.picamera2_controls import (
     Picamera2ControlProfile,
     Picamera2ControlResult,
+)
+
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
+    JetsonControlResult,
 )
 
 RUNNER_MODULE = (
@@ -362,6 +368,9 @@ class ControlledIlluminationPurePythonRunnerTests(
             width=640,
             height=480,
             fps=30.0,
+            jetson_control_profile=(
+                JetsonControlProfile()
+            ),
             camera_controls=(),
             camera_controls_reporter=ANY,
             picamera2_control_profile=(
@@ -370,6 +379,8 @@ class ControlledIlluminationPurePythonRunnerTests(
             picamera2_control_reporter=ANY,
             picamera2_capture_mode_reporter=ANY,
             picamera2_camera_model_reporter=ANY,
+            jetson_control_reporter=ANY,
+            jetson_capture_mode_reporter=ANY,
             environment=environment,
         )
 
@@ -393,6 +404,187 @@ class ControlledIlluminationPurePythonRunnerTests(
             warmup_frame_count=30,
             camera_controls={},
             camera_capture={},
+        )
+
+        write_quality_artifacts.assert_not_called()
+
+    def test_execute_writes_jetson_capture_metadata_to_artifacts(
+        self,
+    ) -> None:
+        benchmark_config = {
+            "test": "benchmark-config",
+        }
+
+        realtime_config = SimpleNamespace(
+            target_fps=30.0,
+            warmup_frames=30,
+            measured_frames=500,
+        )
+
+        algorithm_config = {
+            "name": "gamma_correction",
+            "parameters": {
+                "gamma_value": 0.6,
+            },
+        }
+
+        processor = object()
+        frame_source = object()
+
+        environment = {
+            "VISIONLAB_INPUT_SOURCE": "camera",
+            "VISIONLAB_CAMERA_INDEX": "2",
+            "VISIONLAB_CAMERA_BACKEND": (
+                "jetson_gstreamer"
+            ),
+        }
+
+        records = (object(),)
+
+        expected_paths = (
+            Path("realtime_frame_results.csv"),
+            Path("execution_summary.json"),
+        )
+
+        timestamps = iter(
+            [
+                STARTED_AT,
+                FINISHED_AT,
+            ]
+        )
+
+        def create_jetson_source(
+                *args,
+                **kwargs,
+        ):
+            control_reporter = kwargs[
+                "jetson_control_reporter"
+            ]
+
+            control_reporter(
+                (
+                    JetsonControlResult(
+                        name="gain",
+                        control_name="gainrange",
+                        requested_value=2.5,
+                        applied=True,
+                        effective_value=None,
+                        verified=False,
+                        matches_requested=None,
+                    ),
+                )
+            )
+
+            capture_mode_reporter = kwargs[
+                "jetson_capture_mode_reporter"
+            ]
+
+            capture_mode_reporter(
+                640,
+                480,
+                29.97,
+            )
+
+            return frame_source
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_runner_context_from_environment",
+                return_value=self.context,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_benchmark_config",
+                return_value=benchmark_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "load_realtime_config",
+                return_value=realtime_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_shared_execution_counts",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "validate_context_against_configuration",
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "select_algorithm_configuration",
+                return_value=algorithm_config,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_processor",
+                return_value=processor,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "create_frame_source",
+                side_effect=create_jetson_source,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "run_realtime_trial",
+                return_value=records,
+            ),
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_completed_run_artifacts_atomic",
+                return_value=expected_paths,
+            ) as write_artifacts,
+            patch(
+                f"{RUNNER_MODULE}."
+                "write_quality_capture_artifacts_atomic",
+            ) as write_quality_artifacts,
+        ):
+            actual_paths = execute_pure_python_run(
+                environment,
+                now_provider=lambda: next(
+                    timestamps
+                ),
+            )
+
+        self.assertEqual(
+            actual_paths,
+            expected_paths,
+        )
+
+        write_artifacts.assert_called_once_with(
+            self.context,
+            records,
+            started_at_utc=STARTED_AT,
+            finished_at_utc=FINISHED_AT,
+            warmup_frame_count=30,
+            camera_controls={
+                "gain": {
+                    "backend": "jetson_gstreamer",
+                    "control_name": "gainrange",
+                    "requested": 2.5,
+                    "effective": None,
+                    "applied": True,
+                    "verified": False,
+                    "matches_requested": None,
+                },
+            },
+            camera_capture={
+                "backend": "jetson_gstreamer",
+                "camera_index": 2,
+                "camera_model": None,
+                "requested_mode": {
+                    "width": 640,
+                    "height": 480,
+                    "fps": 30.0,
+                },
+                "effective_mode": {
+                    "width": 640,
+                    "height": 480,
+                    "fps": 29.97,
+                },
+            },
         )
 
         write_quality_artifacts.assert_not_called()
@@ -815,6 +1007,95 @@ class ControlledIlluminationPurePythonRunnerTests(
                 )
 
         iter_picamera2.assert_not_called()
+
+    def test_jetson_backend_uses_gstreamer_frame_source(
+        self,
+    ) -> None:
+        frame_source = object()
+        capture_mode_reporter = Mock()
+        profile = JetsonControlProfile(
+            ae_lock=True,
+            exposure_time_ns=5_000_000,
+        )
+
+        with (
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_jetson_gstreamer_frames",
+                return_value=frame_source,
+            ) as iter_jetson,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_camera_frames",
+            ) as iter_camera,
+            patch(
+                f"{RUNNER_MODULE}."
+                "iter_picamera2_frames",
+            ) as iter_picamera2,
+        ):
+            selected_source = (
+                pure_python_runner.create_frame_source(
+                    {},
+                    width=1280,
+                    height=720,
+                    fps=30.0,
+                    jetson_control_profile=profile,
+                    jetson_capture_mode_reporter=(
+                        capture_mode_reporter
+                    ),
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "1",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "jetson_gstreamer"
+                        ),
+                    },
+                )
+            )
+
+        self.assertIs(
+            selected_source,
+            frame_source,
+        )
+
+        iter_jetson.assert_called_once_with(
+            1,
+            width=1280,
+            height=720,
+            fps=30.0,
+            control_profile=profile,
+            control_reporter=ANY,
+            capture_mode_reporter=(
+                capture_mode_reporter
+            ),
+        )
+
+        iter_camera.assert_not_called()
+        iter_picamera2.assert_not_called()
+
+    def test_jetson_backend_requires_capture_mode(
+        self,
+    ) -> None:
+        with patch(
+            f"{RUNNER_MODULE}."
+            "iter_jetson_gstreamer_frames",
+        ) as iter_jetson:
+            with self.assertRaisesRegex(
+                ControlledIlluminationPurePythonRunnerError,
+                "requires width, height, and fps",
+            ):
+                pure_python_runner.create_frame_source(
+                    {},
+                    environment={
+                        "VISIONLAB_INPUT_SOURCE": "camera",
+                        "VISIONLAB_CAMERA_INDEX": "0",
+                        "VISIONLAB_CAMERA_BACKEND": (
+                            "jetson_gstreamer"
+                        ),
+                    },
+                )
+
+        iter_jetson.assert_not_called()
 
     def test_invalid_camera_index_configuration_is_rejected(
         self,
@@ -1792,6 +2073,74 @@ class ControlledIlluminationPurePythonRunnerTests(
                         "colour_gains": [
                             1.5,
                         ],
+                    }
+                }
+            )
+
+    def test_missing_jetson_control_profile_returns_empty_profile(
+        self,
+    ) -> None:
+        profile = load_jetson_control_profile(
+            {}
+        )
+
+        self.assertEqual(
+            profile,
+            JetsonControlProfile(),
+        )
+
+    def test_jetson_control_profile_is_loaded(
+        self,
+    ) -> None:
+        profile = load_jetson_control_profile(
+            {
+                "jetson_control_profile": {
+                    "ae_lock": True,
+                    "exposure_time_ns": 5_000_000,
+                    "gain": 2.5,
+                    "awb_lock": False,
+                    "wb_mode": 1,
+                }
+            }
+        )
+
+        self.assertEqual(
+            profile,
+            JetsonControlProfile(
+                ae_lock=True,
+                exposure_time_ns=5_000_000,
+                gain=2.5,
+                awb_lock=False,
+                wb_mode=1,
+            ),
+        )
+
+    def test_unknown_jetson_control_profile_field_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ControlledIlluminationPurePythonRunnerError,
+            "Unsupported Jetson control profile fields",
+        ):
+            load_jetson_control_profile(
+                {
+                    "jetson_control_profile": {
+                        "unsupported": 1,
+                    }
+                }
+            )
+
+    def test_invalid_jetson_control_profile_is_rejected(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(
+            ControlledIlluminationPurePythonRunnerError,
+            "Invalid jetson_control_profile",
+        ):
+            load_jetson_control_profile(
+                {
+                    "jetson_control_profile": {
+                        "gain": -1.0,
                     }
                 }
             )

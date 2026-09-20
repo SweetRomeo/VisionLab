@@ -60,6 +60,15 @@ from benchmarks.realtime.picamera2_controls import (
     picamera2_control_results_to_metadata,
     validate_picamera2_control_profile,
 )
+from benchmarks.realtime.jetson_camera import (
+    iter_jetson_gstreamer_frames,
+)
+from benchmarks.realtime.jetson_controls import (
+    JetsonControlProfile,
+    JetsonControlResult,
+    jetson_control_results_to_metadata,
+    validate_jetson_control_profile,
+)
 
 PURE_PYTHON_ARCHITECTURE = "pure_python"
 
@@ -78,6 +87,9 @@ CAMERA_BACKEND_VARIABLE = (
 
 OPENCV_CAMERA_BACKEND = "opencv"
 PICAMERA2_CAMERA_BACKEND = "picamera2"
+JETSON_GSTREAMER_CAMERA_BACKEND = (
+    "jetson_gstreamer"
+)
 EXPERIMENT_CONFIG_VARIABLE = (
     "VISIONLAB_EXPERIMENT_CONFIG"
 )
@@ -313,6 +325,74 @@ def load_picamera2_control_profile(
 
     return profile
 
+def load_jetson_control_profile(
+    experiment_config: dict[str, Any],
+) -> JetsonControlProfile:
+    raw_profile = experiment_config.get(
+        "jetson_control_profile"
+    )
+
+    if raw_profile is None:
+        return JetsonControlProfile()
+
+    if not isinstance(raw_profile, dict):
+        raise ControlledIlluminationPurePythonRunnerError(
+            "jetson_control_profile must be an object."
+        )
+
+    supported_fields = {
+        "ae_lock",
+        "exposure_time_ns",
+        "gain",
+        "awb_lock",
+        "wb_mode",
+    }
+
+    unknown_fields = (
+        set(raw_profile)
+        - supported_fields
+    )
+
+    if unknown_fields:
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Unsupported Jetson control profile fields: "
+            f"{sorted(unknown_fields)}"
+        )
+
+    try:
+        profile = JetsonControlProfile(
+            ae_lock=raw_profile.get(
+                "ae_lock"
+            ),
+            exposure_time_ns=raw_profile.get(
+                "exposure_time_ns"
+            ),
+            gain=raw_profile.get(
+                "gain"
+            ),
+            awb_lock=raw_profile.get(
+                "awb_lock"
+            ),
+            wb_mode=raw_profile.get(
+                "wb_mode"
+            ),
+        )
+
+        validate_jetson_control_profile(
+            profile
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as error:
+        raise ControlledIlluminationPurePythonRunnerError(
+            "Invalid jetson_control_profile: "
+            f"{error}"
+        ) from error
+
+    return profile
+
 def create_frame_source(
     benchmark_config: dict[str, Any],
     *,
@@ -338,27 +418,46 @@ def create_frame_source(
     picamera2_control_profile: (
         Picamera2ControlProfile | None
     ) = None,
-        picamera2_control_reporter: (
-                Callable[
-                    [
-                        tuple[
-                            Picamera2ControlResult,
-                            ...,
-                        ]
-                    ],
-                    None,
+    picamera2_control_reporter: (
+        Callable[
+            [
+                tuple[
+                    Picamera2ControlResult,
+                    ...,
                 ]
-                | None
-        ) = None,
-        picamera2_capture_mode_reporter: (
-                Callable[[int, int, float], None]
-                | None
-        ) = None,
-        picamera2_camera_model_reporter: (
-                Callable[[str | None], None]
-                | None
-        ) = None,
-        environment: Mapping[str, str] | None = None,
+            ],
+            None,
+        ]
+        | None
+    ) = None,
+    picamera2_capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
+    picamera2_camera_model_reporter: (
+        Callable[[str | None], None]
+        | None
+    ) = None,
+    jetson_control_profile: (
+        JetsonControlProfile | None
+    ) = None,
+    jetson_control_reporter: (
+        Callable[
+            [
+                tuple[
+                    JetsonControlResult,
+                    ...,
+                ]
+            ],
+            None,
+        ]
+        | None
+    ) = None,
+    jetson_capture_mode_reporter: (
+        Callable[[int, int, float], None]
+        | None
+    ) = None,
+    environment: Mapping[str, str] | None = None,
 ) -> Any:
     active_environment = (
         os.environ
@@ -433,8 +532,8 @@ def create_frame_source(
         )
 
         if (
-                not isinstance(raw_camera_backend, str)
-                or not raw_camera_backend.strip()
+            not isinstance(raw_camera_backend, str)
+            or not raw_camera_backend.strip()
         ):
             raise ControlledIlluminationPurePythonRunnerError(
                 f"{CAMERA_BACKEND_VARIABLE} must contain "
@@ -459,9 +558,9 @@ def create_frame_source(
 
         if camera_backend == PICAMERA2_CAMERA_BACKEND:
             if (
-                    width is None
-                    or height is None
-                    or fps is None
+                width is None
+                or height is None
+                or fps is None
             ):
                 raise ControlledIlluminationPurePythonRunnerError(
                     "Picamera2 camera backend requires "
@@ -484,6 +583,36 @@ def create_frame_source(
                 ),
                 camera_model_reporter=(
                     picamera2_camera_model_reporter
+                ),
+            )
+
+        if (
+            camera_backend
+            == JETSON_GSTREAMER_CAMERA_BACKEND
+        ):
+            if (
+                width is None
+                or height is None
+                or fps is None
+            ):
+                raise ControlledIlluminationPurePythonRunnerError(
+                    "Jetson GStreamer camera backend "
+                    "requires width, height, and fps."
+                )
+
+            return iter_jetson_gstreamer_frames(
+                camera_index,
+                width=width,
+                height=height,
+                fps=fps,
+                control_profile=(
+                    jetson_control_profile
+                ),
+                control_reporter=(
+                    jetson_control_reporter
+                ),
+                capture_mode_reporter=(
+                    jetson_capture_mode_reporter
                 ),
             )
 
@@ -604,6 +733,12 @@ def execute_pure_python_run(
         )
     )
 
+    jetson_control_profile = (
+        load_jetson_control_profile(
+            experiment_config
+        )
+    )
+
     camera_controls = (
         create_camera_control_requests(
             camera_control_profile
@@ -620,7 +755,16 @@ def execute_pure_python_run(
         ...,
     ] = ()
 
+    effective_jetson_controls: tuple[
+        JetsonControlResult,
+        ...,
+    ] = ()
+
     effective_picamera2_capture_mode: (
+        tuple[int, int, float] | None
+    ) = None
+
+    effective_jetson_capture_mode: (
         tuple[int, int, float] | None
     ) = None
 
@@ -648,6 +792,16 @@ def execute_pure_python_run(
 
         effective_picamera2_controls = results
 
+        jetson_control_profile = (
+            jetson_control_profile
+        ),
+        jetson_control_reporter = (
+            report_jetson_controls
+        ),
+        jetson_capture_mode_reporter = (
+            report_jetson_capture_mode
+        ),
+
     def report_picamera2_capture_mode(
         width: int,
         height: int,
@@ -660,6 +814,29 @@ def execute_pure_python_run(
             height,
             fps,
         )
+
+    def report_jetson_capture_mode(
+        width: int,
+        height: int,
+        fps: float,
+    ) -> None:
+        nonlocal effective_jetson_capture_mode
+
+        effective_jetson_capture_mode = (
+            width,
+            height,
+            fps,
+        )
+
+    def report_jetson_controls(
+        results: tuple[
+            JetsonControlResult,
+            ...,
+        ],
+    ) -> None:
+        nonlocal effective_jetson_controls
+
+        effective_jetson_controls = results
 
     def report_picamera2_camera_model(
         camera_model: str | None,
@@ -705,6 +882,12 @@ def execute_pure_python_run(
         algorithm_config
     )
 
+    jetson_control_profile = (
+        load_jetson_control_profile(
+            experiment_config
+        )
+    )
+
     frame_source = create_frame_source(
         benchmark_config,
         width=planned_run.resolution.width,
@@ -725,6 +908,15 @@ def execute_pure_python_run(
         ),
         picamera2_camera_model_reporter=(
             report_picamera2_camera_model
+        ),
+        jetson_control_profile=(
+            jetson_control_profile
+        ),
+        jetson_control_reporter=(
+            report_jetson_controls
+        ),
+        jetson_capture_mode_reporter=(
+            report_jetson_capture_mode
         ),
         environment=environment,
     )
@@ -747,12 +939,20 @@ def execute_pure_python_run(
         ),
     )
 
-    if effective_picamera2_controls:
+    if effective_jetson_controls:
+        camera_controls_metadata = (
+            jetson_control_results_to_metadata(
+                effective_jetson_controls
+            )
+        )
+
+    elif effective_picamera2_controls:
         camera_controls_metadata = (
             picamera2_control_results_to_metadata(
                 effective_picamera2_controls
             )
         )
+
     else:
         camera_controls_metadata = (
             camera_control_results_to_metadata(
@@ -823,6 +1023,67 @@ def execute_pure_python_run(
             "camera_model": (
                 effective_picamera2_camera_model
             ),
+            "requested_mode": {
+                "width": (
+                    planned_run.resolution.width
+                ),
+                "height": (
+                    planned_run.resolution.height
+                ),
+                "fps": (
+                    realtime_config.target_fps
+                ),
+            },
+            "effective_mode": {
+                "width": effective_width,
+                "height": effective_height,
+                "fps": effective_fps,
+            },
+        }
+
+    is_jetson_camera_run = (
+        isinstance(raw_input_source, str)
+        and raw_input_source.strip().lower()
+        == CAMERA_INPUT_SOURCE
+        and isinstance(raw_camera_backend, str)
+        and raw_camera_backend.strip().lower()
+        == JETSON_GSTREAMER_CAMERA_BACKEND
+    )
+
+    if is_jetson_camera_run:
+        if effective_jetson_capture_mode is None:
+            raise ControlledIlluminationPurePythonRunnerError(
+                "Jetson effective capture mode "
+                "was not reported."
+            )
+
+        raw_camera_index = active_environment.get(
+            CAMERA_INDEX_VARIABLE
+        )
+
+        if (
+            not isinstance(raw_camera_index, str)
+            or not raw_camera_index.strip()
+        ):
+            raise ControlledIlluminationPurePythonRunnerError(
+                "Jetson camera index was not available "
+                "for capture metadata."
+            )
+
+        camera_index = int(
+            raw_camera_index.strip()
+        )
+
+        (
+            effective_width,
+            effective_height,
+            effective_fps,
+        ) = effective_jetson_capture_mode
+
+        camera_capture_metadata = {
+            "backend": JETSON_GSTREAMER_CAMERA_BACKEND,
+            "camera_index": camera_index,
+            "camera_model": None,
             "requested_mode": {
                 "width": (
                     planned_run.resolution.width

@@ -828,6 +828,16 @@ def execute_pure_python_run(
             fps,
         )
 
+    def report_jetson_controls(
+        results: tuple[
+            JetsonControlResult,
+            ...,
+        ],
+    ) -> None:
+        nonlocal effective_jetson_controls
+
+        effective_jetson_controls = results
+
     def report_picamera2_camera_model(
         camera_model: str | None,
     ) -> None:
@@ -901,6 +911,9 @@ def execute_pure_python_run(
         ),
         jetson_control_profile=(
             jetson_control_profile
+        ),
+        jetson_control_reporter=(
+            report_jetson_controls
         ),
         jetson_capture_mode_reporter=(
             report_jetson_capture_mode

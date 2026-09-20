@@ -48,6 +48,7 @@ from benchmarks.realtime.picamera2_controls import (
 
 from benchmarks.realtime.jetson_controls import (
     JetsonControlProfile,
+    JetsonControlResult,
 )
 
 RUNNER_MODULE = (
@@ -378,6 +379,7 @@ class ControlledIlluminationPurePythonRunnerTests(
             picamera2_control_reporter=ANY,
             picamera2_capture_mode_reporter=ANY,
             picamera2_camera_model_reporter=ANY,
+            jetson_control_reporter=ANY,
             jetson_capture_mode_reporter=ANY,
             environment=environment,
         )
@@ -452,9 +454,27 @@ class ControlledIlluminationPurePythonRunnerTests(
         )
 
         def create_jetson_source(
-            *args,
-            **kwargs,
+                *args,
+                **kwargs,
         ):
+            control_reporter = kwargs[
+                "jetson_control_reporter"
+            ]
+
+            control_reporter(
+                (
+                    JetsonControlResult(
+                        name="gain",
+                        control_name="gainrange",
+                        requested_value=2.5,
+                        applied=True,
+                        effective_value=None,
+                        verified=False,
+                        matches_requested=None,
+                    ),
+                )
+            )
+
             capture_mode_reporter = kwargs[
                 "jetson_capture_mode_reporter"
             ]
@@ -539,7 +559,17 @@ class ControlledIlluminationPurePythonRunnerTests(
             started_at_utc=STARTED_AT,
             finished_at_utc=FINISHED_AT,
             warmup_frame_count=30,
-            camera_controls={},
+            camera_controls={
+                "gain": {
+                    "backend": "jetson_gstreamer",
+                    "control_name": "gainrange",
+                    "requested": 2.5,
+                    "effective": None,
+                    "applied": True,
+                    "verified": False,
+                    "matches_requested": None,
+                },
+            },
             camera_capture={
                 "backend": "jetson_gstreamer",
                 "camera_index": 2,

@@ -180,3 +180,131 @@ def serialize_jetson_source_properties(
         )
 
     return " ".join(serialized)
+
+JetsonControlValue = (
+    bool
+    | int
+    | float
+)
+
+
+@dataclass(frozen=True)
+class JetsonControlResult:
+    name: str
+    control_name: str
+    requested_value: JetsonControlValue
+    applied: bool
+    effective_value: (
+        JetsonControlValue | None
+    )
+    verified: bool
+    matches_requested: bool | None
+
+
+JETSON_CONTROL_NAMES = {
+    "ae_lock": "aelock",
+    "exposure_time_ns": "exposuretimerange",
+    "gain": "gainrange",
+    "awb_lock": "awblock",
+    "wb_mode": "wbmode",
+}
+
+
+def create_applied_jetson_control_results(
+    profile: JetsonControlProfile,
+) -> tuple[JetsonControlResult, ...]:
+    validate_jetson_control_profile(
+        profile
+    )
+
+    requested_controls = (
+        (
+            "ae_lock",
+            profile.ae_lock,
+        ),
+        (
+            "exposure_time_ns",
+            profile.exposure_time_ns,
+        ),
+        (
+            "gain",
+            profile.gain,
+        ),
+        (
+            "awb_lock",
+            profile.awb_lock,
+        ),
+        (
+            "wb_mode",
+            profile.wb_mode,
+        ),
+    )
+
+    results: list[JetsonControlResult] = []
+
+    for name, requested_value in requested_controls:
+        if requested_value is None:
+            continue
+
+        if name == "gain":
+            requested_value = float(
+                requested_value
+            )
+
+        results.append(
+            JetsonControlResult(
+                name=name,
+                control_name=(
+                    JETSON_CONTROL_NAMES[name]
+                ),
+                requested_value=requested_value,
+                applied=True,
+                effective_value=None,
+                verified=False,
+                matches_requested=None,
+            )
+        )
+
+    return tuple(results)
+
+
+def jetson_control_results_to_metadata(
+    results: tuple[
+        JetsonControlResult,
+        ...,
+    ],
+) -> dict[str, dict[str, Any]]:
+    metadata: dict[
+        str,
+        dict[str, Any],
+    ] = {}
+
+    for result in results:
+        if not isinstance(
+            result,
+            JetsonControlResult,
+        ):
+            raise TypeError(
+                "Every result must be a "
+                "JetsonControlResult."
+            )
+
+        metadata[result.name] = {
+            "backend": "jetson_gstreamer",
+            "control_name": (
+                result.control_name
+            ),
+            "requested": (
+                result.requested_value
+            ),
+            "effective": (
+                result.effective_value
+            ),
+            "applied": result.applied,
+            "verified": result.verified,
+            "matches_requested": (
+                result.matches_requested
+            ),
+        }
+
+    return metadata

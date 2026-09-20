@@ -9,6 +9,7 @@ import sys
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+from dataclasses import replace
 
 from benchmarks.experiments.controlled_illumination_executor import (
     ControlledIlluminationExecutionError,

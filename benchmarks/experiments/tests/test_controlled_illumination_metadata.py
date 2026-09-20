@@ -716,6 +716,44 @@ class ControlledIlluminationMetadataTests(
             }
         )
 
+    def test_jetson_camera_control_metadata_is_valid(
+        self,
+    ) -> None:
+        camera_settings = dict(
+            self.metadata.camera_settings
+        )
+
+        camera_settings["controls"] = {
+            "ae_lock": {
+                "backend": "jetson_gstreamer",
+                "control_name": "aelock",
+                "requested": True,
+                "effective": None,
+                "applied": True,
+                "verified": False,
+                "matches_requested": None,
+            },
+            "gain": {
+                "backend": "jetson_gstreamer",
+                "control_name": "gainrange",
+                "requested": 2.5,
+                "effective": None,
+                "applied": True,
+                "verified": False,
+                "matches_requested": None,
+            },
+        }
+
+        metadata = replace(
+            self.metadata,
+            camera_settings=camera_settings,
+        )
+
+        validate_run_metadata(
+            metadata,
+            self.config,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
